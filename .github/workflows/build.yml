@@ -23,6 +23,11 @@ jobs:
           set -o pipefail
           ./build.sh 2>&1 | tee build.log
 
+      - name: Verify universal binary
+        run: |
+          lipo -info build/QuickNote.app/Contents/MacOS/QuickNote
+          lipo build/QuickNote.app/Contents/MacOS/QuickNote -verify_arch arm64 x86_64
+
       - name: Package
         run: |
           cd build

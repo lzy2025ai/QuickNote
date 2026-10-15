@@ -8,8 +8,10 @@ DISPLAY_NAME="随手记"
 BUNDLE_ID="com.local.quicknote"
 VERSION="1.0.0"
 
-swift build -c release
-BIN="$(swift build -c release --show-bin-path)/$APP_NAME"
+# 通用二进制：同时支持 Apple 芯片（arm64）和 Intel 芯片（x86_64）
+ARCH_FLAGS=(--arch arm64 --arch x86_64)
+swift build -c release "${ARCH_FLAGS[@]}"
+BIN="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)/$APP_NAME"
 
 APP="build/$APP_NAME.app"
 rm -rf "$APP"
