@@ -10,17 +10,7 @@ struct NoteListView: View {
     @Binding var detail: Detail?
     /// 新建笔记后滚动到它
     var revealID: UUID?
-    let onCreate: () -> Void
-
-    private var title: String {
-        switch scope {
-        case .all: return "全部笔记"
-        case .inbox: return "收件箱"
-        case .clipboard: return "剪贴板"
-        case .project(let id): return store.project(id)?.name ?? "项目"
-        case .tag(let t): return "#" + t
-        }
-    }
+    @FocusState private var focused: Bool
 
     private var showsProject: Bool {
         if case .project = scope { return false }
@@ -32,50 +22,67 @@ struct NoteListView: View {
         let pinned = notes.filter(\.pinned)
         let others = notes.filter { !$0.pinned }
         ScrollViewReader { proxy in
-            List(selection: $detail) {
-                // 与“备忘录”一样：有置顶时分成“置顶”和“笔记”两组
-                if pinned.isEmpty {
-                    rows(others)
-                } else {
-                    Section("置顶") { rows(pinned) }
-                    if !others.isEmpty {
-                        Section("笔记") { rows(others) }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if !pinned.isEmpty {
+                        SectionLabel("置顶").padding(.horizontal, 12).padding(.vertical, 6)
+                        rows(pinned)
+                        if !others.isEmpty {
+                            SectionLabel("笔记").padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 6)
+                        }
                     }
+                    rows(others)
                 }
-            }
-            .listStyle(.inset)
-            .animation(Motion.standard, value: notes.map(\.id))
-            .onDeleteCommand {
-                if case .note(let id) = detail { store.deleteNote(id) }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 16)
+                .animation(Motion.standard, value: notes.map(\.id))
             }
             .overlay {
                 if notes.isEmpty {
-                    EmptyStateView(title: "没有笔记", systemImage: "note.text", description: "按 ⌘N 新建一条")
+                    EmptyStateView(title: "还没有笔记", detail: "按 ⌘N 新建一则")
                 }
+            }
+            .focusable()
+            .focused($focused)
+            .hideFocusRing()
+            .onMoveCommand { direction in
+                move(direction, in: pinned + others, proxy: proxy)
+            }
+            .onDeleteCommand {
+                if case .note(let id) = detail { store.deleteNote(id) }
             }
             .onChange(of: revealID) { id in
                 guard let id else { return }
                 withAnimation(Motion.standard) { proxy.scrollTo(id, anchor: .top) }
             }
         }
-        .navigationTitle(title)
-        .navigationSubtitle("\(notes.count) 条笔记")
-        .toolbar {
-            ToolbarItem {
-                Button(action: onCreate) {
-                    Label("新建笔记", systemImage: "square.and.pencil")
-                }
-                .help("新建笔记（⌘N）")
-            }
-        }
     }
 
     private func rows(_ notes: [Note]) -> some View {
         ForEach(notes) { note in
-            NoteRow(note: note, showProject: showsProject)
-                .tag(Detail.note(note.id))
+            NoteRow(note: note, selected: detail == .note(note.id), showProject: showsProject)
+                .id(note.id)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    detail = .note(note.id)
+                    focused = true
+                }
                 .contextMenu { NoteContextMenu(note: note) }
         }
+    }
+
+    /// 方向键在列表里上下移动
+    private func move(_ direction: MoveCommandDirection, in notes: [Note], proxy: ScrollViewProxy) {
+        guard !notes.isEmpty else { return }
+        let index = notes.firstIndex { detail == .note($0.id) }
+        let next: Int
+        switch direction {
+        case .up: next = max((index ?? 0) - 1, 0)
+        case .down: next = min((index ?? -1) + 1, notes.count - 1)
+        default: return
+        }
+        detail = .note(notes[next].id)
+        proxy.scrollTo(notes[next].id)
     }
 }
 
@@ -107,92 +114,95 @@ struct NoteContextMenu: View {
     }
 }
 
-/// 仿“备忘录”的行：标题一行；日期 + 摘要一行；需要时再加一行项目 / 标签
+/// 列表行：左侧大号日期，右侧标题、摘要、标签
 struct NoteRow: View {
     @EnvironmentObject var store: Store
     let note: Note
+    var selected = false
     var showProject = false
     var query: String = ""
+    @State private var hovering = false
 
     var body: some View {
         let terms = SearchText.terms(query)
         let preview = terms.isEmpty ? note.preview : SearchText.snippet(note.preview, terms: terms)
         let project = showProject ? store.project(note.projectID) : nil
 
-        VStack(alignment: .leading, spacing: 2) {
-            Text(SearchText.highlight(note.displayTitle, terms: terms))
-                .font(Typography.rowTitle)
-                .lineLimit(1)
-
-            HStack(spacing: 6) {
-                Text(RelativeDate.short(note.updatedAt))
-                    .foregroundStyle(.primary)
-                Text(preview.isEmpty ? AttributedString("无更多内容") : SearchText.highlight(preview, terms: terms))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        HStack(alignment: .top, spacing: 14) {
+            VStack(spacing: 2) {
+                Text(ChineseDate.day(note.updatedAt))
+                    .font(.numeral(28, weight: .semibold))
+                    .foregroundStyle(selected ? Palette.seal : Palette.ink2)
+                Text(ChineseDate.month(note.updatedAt))
+                    .font(.system(size: 10))
+                    .tracking(1)
+                    .foregroundStyle(Palette.muted)
             }
-            .font(Typography.rowDetail)
+            .frame(width: 36)
 
-            if project != nil || !note.tags.isEmpty || !note.attachments.isEmpty {
-                HStack(spacing: 8) {
-                    if let project {
-                        Label {
-                            Text(project.name)
-                        } icon: {
-                            Image(systemName: project.icon).foregroundStyle(project.tint)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(SearchText.highlight(note.displayTitle, terms: terms))
+                    .font(Typography.rowTitle)
+                    .foregroundStyle(Palette.ink)
+                    .lineLimit(1)
+                if !preview.isEmpty {
+                    Text(SearchText.highlight(preview, terms: terms))
+                        .font(Typography.rowDetail)
+                        .foregroundStyle(Palette.ink2)
+                        .lineSpacing(2)
+                        .lineLimit(2)
+                }
+                if project != nil || !note.tags.isEmpty || !note.attachments.isEmpty {
+                    HStack(spacing: 8) {
+                        if let project {
+                            HStack(spacing: 4) {
+                                RoundedRectangle(cornerRadius: 1.5).fill(project.tint).frame(width: 7, height: 7)
+                                Text(project.name).foregroundStyle(Palette.muted)
+                            }
+                        }
+                        if !note.attachments.isEmpty {
+                            Image(systemName: "photo").foregroundStyle(Palette.muted)
+                        }
+                        if !note.tags.isEmpty {
+                            Text(note.tags.map { "#" + $0 }.joined(separator: " · "))
+                                .foregroundStyle(Palette.tag)
                         }
                     }
-                    if !note.attachments.isEmpty {
-                        Image(systemName: "photo")
-                    }
-                    if !note.tags.isEmpty {
-                        Text(note.tags.map { "#" + $0 }.joined(separator: " "))
-                    }
+                    .font(.system(size: 11.5))
+                    .lineLimit(1)
+                    .padding(.top, 1)
                 }
-                .font(Typography.meta)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.top, 1)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, Metrics.rowVerticalPadding)
-    }
-}
-
-enum RelativeDate {
-    /// 今天显示时间，昨天显示“昨天”，一周内显示星期，再早显示日期
-    static func short(_ date: Date) -> String {
-        let cal = Calendar.current
-        if cal.isDateInToday(date) { return date.formatted(date: .omitted, time: .shortened) }
-        if cal.isDateInYesterday(date) { return "昨天" }
-        if let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: Date())).day,
-           days < 7 {
-            return date.formatted(.dateTime.weekday(.wide))
-        }
-        return date.formatted(.dateTime.year().month(.defaultDigits).day())
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(selected ? Palette.paper : (hovering ? Palette.paper.opacity(0.45) : Color.clear))
+                .shadow(color: selected ? Palette.shadow : .clear, radius: 8, y: 3)
+        )
+        .onHover { h in withAnimation(Motion.quick) { hovering = h } }
     }
 }
 
 struct EmptyStateView: View {
     let title: String
-    let systemImage: String
-    var description: String?
+    var detail: String?
 
     var body: some View {
-        if #available(macOS 14.0, *) {
-            ContentUnavailableView(title, systemImage: systemImage, description: description.map { Text($0) })
-        } else {
-            VStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(.tertiary)
-                Text(title).font(.title3).foregroundStyle(.secondary)
-                if let description {
-                    Text(description).font(.callout).foregroundStyle(.tertiary)
-                }
+        VStack(spacing: 8) {
+            AppMark(size: 34).opacity(0.85)
+            Text(title)
+                .font(.song(15, bold: true))
+                .foregroundStyle(Palette.ink2)
+                .padding(.top, 6)
+            if let detail {
+                Text(detail)
+                    .font(Typography.meta)
+                    .foregroundStyle(Palette.muted)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -264,22 +274,23 @@ struct NoteEditorView: View {
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(metaLine)
-                    .font(Typography.meta)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 2)
+            actionBar
+                .frame(height: Metrics.titlebarHeight + 12)
+
+            VStack(alignment: .leading, spacing: 16) {
+                dateBlock
+                Rectangle().fill(Palette.ink).frame(height: 1).opacity(0.85)
 
                 TextField("标题", text: note.title)
                     .textFieldStyle(.plain)
-                    .font(Typography.editorTitle)
+                    .font(.song(30, bold: true))
+                    .foregroundStyle(Palette.ink)
+                    .tracking(1.5)
                     .focused($titleFocused)
 
                 TagsEditor(tags: note.tags, suggestions: store.allTags.map(\.name))
 
                 FieldsEditor(fields: note.fields)
-                    .padding(.top, 2)
 
                 if !draft.attachments.isEmpty {
                     AttachmentsView(attachments: draft.attachments) { name in
@@ -290,19 +301,20 @@ struct NoteEditorView: View {
                 }
             }
             .padding(.horizontal, Metrics.editorInset)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
+            .padding(.bottom, 8)
 
-            NoteTextView(text: note.content, placeholder: "开始记录…")
+            NoteTextView(text: note.content, placeholder: "写点什么…  支持 Markdown：# 标题、**加粗**、- 列表、- [ ] 待办、--- 分隔")
+
+            footer
         }
-        .frame(maxWidth: Metrics.readableWidth)
-        .frame(maxWidth: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
+        .frame(maxWidth: Metrics.readableWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(Palette.paper)
         .overlay {
             if dropTargeted {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6]))
-                    .padding(6)
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Palette.seal, style: StrokeStyle(lineWidth: 1.5, dash: [6]))
+                    .padding(10)
                     .allowsHitTesting(false)
             }
         }
@@ -315,8 +327,7 @@ struct NoteEditorView: View {
             }
             return true
         }
-        .toolbar { editorToolbar }
-        .alert("删除这条笔记？", isPresented: $confirmDelete) {
+        .alert("删除这则笔记？", isPresented: $confirmDelete) {
             Button("删除", role: .destructive) {
                 commitWork?.cancel()
                 commitWork = nil
@@ -328,39 +339,40 @@ struct NoteEditorView: View {
         }
     }
 
-    private var metaLine: String {
-        var parts = [draft.updatedAt.formatted(date: .long, time: .shortened)]
-        if let p = store.project(draft.projectID) { parts.append(p.name) }
-        return parts.joined(separator: " · ")
+    /// 大号日期 + 中文月份星期
+    private var dateBlock: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 14) {
+            Text(ChineseDate.day(draft.createdAt))
+                .font(.numeral(64, weight: .regular))
+                .foregroundStyle(Palette.ink)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(ChineseDate.month(draft.createdAt) + " · " + ChineseDate.weekday(draft.createdAt))
+                    .font(.song(15))
+                    .tracking(3)
+                    .foregroundStyle(Palette.ink)
+                Text("\(Calendar.current.component(.year, from: draft.createdAt)) · \(ChineseDate.time(draft.createdAt))")
+                    .font(.system(size: 11.5))
+                    .tracking(2)
+                    .foregroundStyle(Palette.muted)
+            }
+            Spacer()
+        }
     }
 
-    /// 工具栏只放常用的：所属项目、添加图片、分享；置顶和删除收进“更多”
-    @ToolbarContentBuilder
-    private var editorToolbar: some ToolbarContent {
-        ToolbarItemGroup {
-            Menu {
-                Picker("移动到", selection: note.projectID) {
-                    Label("收件箱", systemImage: "tray").tag(UUID?.none)
-                    ForEach(store.projects) { p in
-                        Label(p.name, systemImage: p.icon).tag(Optional(p.id))
-                    }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Label("移动到项目", systemImage: "folder")
-            }
-            .help("移动到项目")
-
+    /// 右上角：添加图片、分享、更多
+    private var actionBar: some View {
+        HStack(spacing: 2) {
+            Spacer()
             Menu {
                 Button("选择图片…") { pickImages() }
                 Button("粘贴剪贴板中的图片") {
                     if let png = Pasteboard.imagePNGData(), let name = store.importAttachment(pngData: png) {
-                        note.wrappedValue.attachments.append(name)
+                        withAnimation(Motion.standard) { note.wrappedValue.attachments.append(name) }
                         commitNow()
                     }
                 }
             } label: {
-                Label("添加图片", systemImage: "photo")
+                Image(systemName: "photo")
             }
             .help("添加图片（也可以直接拖进来）")
 
@@ -375,7 +387,7 @@ struct NoteEditorView: View {
                     MarkdownExporter.exportNote(draft, store: store)
                 }
             } label: {
-                Label("分享", systemImage: "square.and.arrow.up")
+                Image(systemName: "square.and.arrow.up")
             }
             .help("拷贝 / 导出")
 
@@ -386,13 +398,42 @@ struct NoteEditorView: View {
                         commitNow()
                     }
                 }
+                Picker("移动到", selection: note.projectID) {
+                    Text("收件箱").tag(UUID?.none)
+                    ForEach(store.projects) { p in
+                        Text(p.name).tag(Optional(p.id))
+                    }
+                }
                 Divider()
-                Button("删除笔记…", role: .destructive) { confirmDelete = true }
+                Button("删除这则笔记…", role: .destructive) { confirmDelete = true }
             } label: {
-                Label("更多", systemImage: "ellipsis.circle")
+                Image(systemName: "ellipsis")
             }
             .help("更多")
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: false, vertical: true)
+        .foregroundStyle(Palette.ink2)
+        .font(.system(size: 15))
+        .padding(.horizontal, 22)
+        .padding(.top, 6)
+    }
+
+    private var footer: some View {
+        HStack {
+            HStack(spacing: 7) {
+                Circle().fill(Palette.saved).frame(width: 6, height: 6)
+                Text(commitWork == nil ? (store.isICloud ? "已存 · iCloud" : "已存 · 本机") : "编辑中…")
+            }
+            Spacer()
+            Text("\(draft.content.filter { !$0.isWhitespace }.count) 字")
+        }
+        .font(.system(size: 11))
+        .tracking(1)
+        .foregroundStyle(Palette.muted)
+        .padding(.horizontal, Metrics.editorInset)
+        .frame(height: 38)
     }
 
     private func addAttachment(fileURL: URL) {
@@ -410,7 +451,7 @@ struct NoteEditorView: View {
     }
 }
 
-// MARK: - 标签：标题下方一行，强调色文字，无多余装饰
+// MARK: - 标签：朱砂色文字，用“·”分隔
 
 struct TagsEditor: View {
     @Binding var tags: [String]
@@ -422,16 +463,20 @@ struct TagsEditor: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            ForEach(tags, id: \.self) { tag in
+        HStack(spacing: 8) {
+            ForEach(Array(tags.enumerated()), id: \.element) { index, tag in
+                if index > 0 {
+                    Text("·").foregroundStyle(Palette.faint)
+                }
                 TagChip(name: tag) {
                     withAnimation(Motion.quick) { tags.removeAll { $0 == tag } }
                 }
             }
-            TextField(tags.isEmpty ? "添加标签" : "", text: $input)
+            TextField("＋ 标签", text: $input)
                 .textFieldStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.muted)
                 .frame(minWidth: 60, maxWidth: 140)
+                .padding(.leading, tags.isEmpty ? 0 : 6)
                 .onSubmit(commit)
             if !available.isEmpty {
                 Menu {
@@ -444,12 +489,12 @@ struct TagsEditor: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Palette.faint)
                 .help("选择已有标签")
             }
             Spacer(minLength: 0)
         }
-        .font(.callout)
+        .font(.system(size: 13))
     }
 
     /// 支持一次输入多个，用逗号或空格分隔
@@ -471,15 +516,13 @@ struct TagChip: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            Text("#" + name)
-                .foregroundStyle(Color.accentColor)
+            Text("#" + name).foregroundStyle(Palette.tag)
             // 删除按钮常驻占位，只切换透明度，悬停时不挤动布局
             Button(action: onRemove) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .semibold))
+                Image(systemName: "xmark").font(.system(size: 8, weight: .semibold))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Palette.muted)
             .opacity(hovering ? 1 : 0)
             .help("移除标签")
         }
@@ -496,13 +539,10 @@ struct AttachmentsView: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
                 ForEach(attachments, id: \.self) { name in
                     let url = store.attachmentURL(name)
-                    ThumbnailView(url: url)
-                        .frame(width: 104, height: 78)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+                    PhotoPrint(url: url, width: 112, height: 80)
                         .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
                         .help("双击用“预览”打开")
                         .contextMenu {
@@ -514,34 +554,60 @@ struct AttachmentsView: View {
                         }
                 }
             }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 2)
         }
-        .frame(height: 78)
+        .frame(height: 100)
     }
 }
 
-// MARK: - 结构化字段：类似“通讯录”卡片，字段名在左、内容在右，悬停时出现拷贝 / 删除
+/// 像夹在本子里的照片：白边、相角、略带阴影
+struct PhotoPrint: View {
+    let url: URL
+    var width: CGFloat
+    var height: CGFloat
+    var tilt: Double = 0
+
+    var body: some View {
+        ThumbnailView(url: url)
+            .frame(width: width - 10, height: height - 10)
+            .clipped()
+            .padding(5)
+            .background(Color.white)
+            .overlay(alignment: .topLeading) { PhotoCorner().frame(width: 14, height: 14).offset(x: -2, y: -2) }
+            .overlay(alignment: .bottomTrailing) { PhotoCorner().rotationEffect(.degrees(180)).frame(width: 14, height: 14).offset(x: 2, y: 2) }
+            .shadow(color: Palette.shadow, radius: 6, y: 3)
+            .rotationEffect(.degrees(tilt))
+    }
+}
+
+private struct PhotoCorner: View {
+    var body: some View {
+        Path { p in
+            p.move(to: .zero)
+            p.addLine(to: CGPoint(x: 14, y: 0))
+            p.addLine(to: CGPoint(x: 0, y: 14))
+            p.closeSubpath()
+        }
+        .fill(Color(nsColor: .paper(0x8A7E69, 0x5C554A)))
+    }
+}
+
+// MARK: - 结构化字段：账本样式，字段名 …… 内容，悬停时出现拷贝 / 删除
 
 struct FieldsEditor: View {
     @Binding var fields: [NoteField]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !fields.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach($fields) { $field in
-                        FieldRow(field: $field) {
-                            let id = field.id
-                            withAnimation(Motion.standard) { fields.removeAll { $0.id == id } }
-                        }
-                        if field.id != fields.last?.id {
-                            Divider().padding(.leading, 12)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach($fields) { $field in
+                FieldRow(field: $field) {
+                    let id = field.id
+                    withAnimation(Motion.standard) { fields.removeAll { $0.id == id } }
                 }
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.03)))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.07)))
             }
             FieldActions(fields: $fields)
+                .padding(.top, fields.isEmpty ? 0 : 4)
         }
     }
 }
@@ -555,7 +621,7 @@ struct FieldActions: View {
             Button {
                 withAnimation(Motion.standard) { fields.append(NoteField()) }
             } label: {
-                Label("添加字段", systemImage: "plus")
+                Text("＋ 字段")
             }
             Menu {
                 ForEach(FieldTemplate.allCases, id: \.self) { t in
@@ -567,15 +633,15 @@ struct FieldActions: View {
                     }
                 }
             } label: {
-                Label("字段模板", systemImage: "list.bullet.rectangle")
+                Text("字段模板")
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
         }
         .buttonStyle(.borderless)
-        .font(Typography.meta)
-        .foregroundStyle(.secondary)
+        .font(.system(size: 12))
+        .foregroundStyle(Palette.muted)
     }
 }
 
@@ -585,36 +651,69 @@ private struct FieldRow: View {
     @State private var hovering = false
     @State private var copied = false
 
+    /// 电话、编号这类内容用衬线数字显示
+    private var isNumeric: Bool {
+        !field.value.isEmpty && field.value.allSatisfy { $0.isNumber || " +-()".contains($0) }
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             TextField("字段", text: $field.key)
                 .textFieldStyle(.plain)
-                .foregroundStyle(.secondary)
-                .frame(width: 72, alignment: .leading)
-            TextField("内容", text: $field.value)
-                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .tracking(2)
+                .foregroundStyle(Palette.muted)
+                .frame(width: 60, alignment: .leading)
+            DottedLeader()
+                .frame(minWidth: 24)
+            ZStack(alignment: .trailing) {
+                // 隐藏文字撑开宽度，让引线一直延伸到内容前
+                Text(field.value.isEmpty ? "内容" : field.value)
+                    .font(valueFont)
+                    .hidden()
+                    .padding(.horizontal, 2)
+                TextField("内容", text: $field.value)
+                    .textFieldStyle(.plain)
+                    .font(valueFont)
+                    .foregroundStyle(Palette.ink)
+                    .multilineTextAlignment(.trailing)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: 320, alignment: .trailing)
+
             // 按钮常驻占位，只切换透明度，悬停时不会挤动布局
-            HStack(spacing: 10) {
+            HStack(spacing: 6) {
                 Button {
                     Pasteboard.copy(field.value)
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+                    withAnimation(Motion.quick) { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        withAnimation(Motion.quick) { copied = false }
+                    }
                 } label: {
-                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    Text(copied ? "已拷贝" : "拷贝")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.onButton)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Palette.button))
                 }
+                .buttonStyle(.plain)
                 .help("拷贝内容")
                 Button(action: onDelete) {
                     Image(systemName: "minus.circle")
+                        .foregroundStyle(Palette.muted)
                 }
+                .buttonStyle(.plain)
                 .help("删除字段")
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
             .opacity(hovering || copied ? 1 : 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 5)
         .contentShape(Rectangle())
         .onHover { h in withAnimation(Motion.quick) { hovering = h } }
+    }
+
+    private var valueFont: Font {
+        isNumeric ? .numeral(17, weight: .semibold) : .system(size: 14, weight: .medium)
     }
 }

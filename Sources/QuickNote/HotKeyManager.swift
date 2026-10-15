@@ -2,6 +2,7 @@ import AppKit
 import Carbon
 
 enum HotKeyAction: UInt32, CaseIterable, Identifiable {
+    case quickCapture = 3
     case toggleWindow = 1
     case showClipboard = 2
 
@@ -9,7 +10,8 @@ enum HotKeyAction: UInt32, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .toggleWindow: return "唤起 / 隐藏窗口"
+        case .quickCapture: return "随手记一笔（快速记录）"
+        case .toggleWindow: return "打开 / 隐藏主窗口"
         case .showClipboard: return "打开剪贴板历史"
         }
     }
@@ -18,7 +20,8 @@ enum HotKeyAction: UInt32, CaseIterable, Identifiable {
 
     var defaultCombo: HotKeyCombo? {
         switch self {
-        case .toggleWindow: return HotKeyCombo(keyCode: 49, modifiers: UInt32(optionKey))                // ⌥Space
+        case .quickCapture: return HotKeyCombo(keyCode: 49, modifiers: UInt32(optionKey))                // ⌥Space
+        case .toggleWindow: return HotKeyCombo(keyCode: 49, modifiers: UInt32(controlKey | optionKey))   // ⌃⌥Space
         case .showClipboard: return HotKeyCombo(keyCode: 9, modifiers: UInt32(controlKey | optionKey))   // ⌃⌥V
         }
     }

@@ -67,6 +67,11 @@ final class AppSettings: ObservableObject {
                 hotKeys[action] = action.defaultCombo
             }
         }
+        // 新增的“快速记录”默认用 ⌥Space；如果已被另一个快捷键占用，先留空，由用户在设置里选
+        if let capture = hotKeys[.quickCapture],
+           HotKeyAction.allCases.contains(where: { $0 != .quickCapture && hotKeys[$0] == capture }) {
+            hotKeys[.quickCapture] = nil
+        }
     }
 
     func defaultNoteTitle(projectName: String?, date: Date = Date()) -> String {

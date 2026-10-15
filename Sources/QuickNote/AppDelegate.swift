@@ -8,6 +8,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
     private var settingsWindow: NSWindow?
     private var statusItem: NSStatusItem!
+    private lazy var capture: QuickCaptureController = {
+        let controller = QuickCaptureController(store: store)
+        controller.isMainWindowVisible = { [weak self] in self?.window.isVisible ?? false }
+        controller.onOpenNote = { [weak self] id in
+            self?.showWindow()
+            NotificationCenter.default.post(name: .qnOpenNote, object: id)
+        }
+        return controller
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(settings.showDockIcon ? .regular : .accessory)
@@ -16,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildStatusItem()
 
         HotKeyManager.shared.handlers = [
+            HotKeyAction.quickCapture.rawValue: { [weak self] in self?.quickCapture() },
             HotKeyAction.toggleWindow.rawValue: { [weak self] in self?.toggleWindow() },
             HotKeyAction.showClipboard.rawValue: { [weak self] in self?.toggleClipboard() },
         ]
@@ -55,17 +65,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1040, height: 660),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.contentViewController = hosting
         window.title = "随手记"
-        window.toolbarStyle = .unified
+        // 隐藏标题栏，让纸面一直铺到顶部，红绿灯浮在侧栏上
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = Palette.paperNS
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
-        window.minSize = NSSize(width: 860, height: 500)
-        window.setContentSize(NSSize(width: 1040, height: 660))
+        window.minSize = NSSize(width: 900, height: 560)
+        window.setContentSize(NSSize(width: 1240, height: 780))
         window.center()
         window.setFrameAutosaveName("QuickNoteMainWindow")
     }
@@ -113,8 +127,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 呼出后如果没有正在编辑的地方，直接把光标放进搜索框，马上就能打字
         DispatchQueue.main.async {
-            if self.window.firstResponder === self.window, let field = self.findSearchField() {
-                self.window.makeFirstResponder(field)
+            if self.window.firstResponder === self.window {
+                NotificationCenter.default.post(name: .qnFocusSearch, object: nil)
             }
         }
     }
@@ -181,27 +195,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func focusSearch() {
         showWindow()
-        DispatchQueue.main.async {
-            if let field = self.findSearchField() {
-                self.window.makeFirstResponder(field)
-            }
-        }
+        NotificationCenter.default.post(name: .qnFocusSearch, object: nil)
     }
 
-    private func findSearchField() -> NSSearchField? {
-        for item in window.toolbar?.items ?? [] {
-            if let search = item as? NSSearchToolbarItem { return search.searchField }
-            if let field = item.view as? NSSearchField { return field }
-        }
-        // 兜底：在标题栏的视图层级里找
-        func find(in view: NSView) -> NSSearchField? {
-            if let field = view as? NSSearchField { return field }
-            for sub in view.subviews {
-                if let found = find(in: sub) { return found }
-            }
-            return nil
-        }
-        return window.contentView?.superview.flatMap(find)
+    @objc func quickCapture() {
+        capture.toggle()
     }
 
     @objc func toggleSidebar() {
@@ -219,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = NSImage(systemSymbolName: "note.text", accessibilityDescription: "随手记")
 
         let menu = NSMenu()
+        menu.addItem(item("随手记一笔", #selector(quickCapture)))
         menu.addItem(item("显示 / 隐藏窗口", #selector(toggleWindow)))
         menu.addItem(item("剪贴板历史", #selector(showClipboard)))
         menu.addItem(item("新建笔记", #selector(newNote)))
@@ -254,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let fileMenu = NSMenu(title: "文件")
         fileMenu.addItem(item("新建笔记", #selector(newNote), key: "n"))
+        fileMenu.addItem(item("随手记一笔…", #selector(quickCapture)))
         fileMenu.addItem(item("新建项目…", #selector(newProject), key: "n", modifiers: [.command, .shift]))
         fileMenu.addItem(item("搜索", #selector(focusSearch), key: "f"))
         fileMenu.addItem(item("剪贴板历史", #selector(showClipboard), key: "y", modifiers: [.command, .shift]))
