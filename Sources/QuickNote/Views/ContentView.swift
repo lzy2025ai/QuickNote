@@ -185,7 +185,7 @@ struct ContentView: View {
                 .id(id)
                 .transition(.opacity)
         } else {
-            EmptyStateView(title: "选一则笔记，或新建一则", detail: "⌘N 新建 · ⌘F 搜索 · ⌥Space 随手记一笔")
+            EmptyStateView(title: "选一则笔记，或新建一则", detail: "⌘N 新建　⌘F 搜索\n⌥Space 随手记一笔")
         }
     }
 

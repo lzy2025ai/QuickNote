@@ -200,8 +200,11 @@ struct EmptyStateView: View {
                 Text(detail)
                     .font(Typography.meta)
                     .foregroundStyle(Palette.muted)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
             }
         }
+        .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

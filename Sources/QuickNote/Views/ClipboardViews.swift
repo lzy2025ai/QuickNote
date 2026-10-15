@@ -79,30 +79,35 @@ struct ClipListView: View {
         }
     }
 
+    /// 类型筛选用文字标签，选中的加粗并在下方点一笔朱砂；右侧是“记录中 / 已暂停”开关和“清空”
     private var controls: some View {
-        HStack(spacing: 8) {
-            Picker("类型", selection: $filter) {
-                ForEach(ClipFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        HStack(alignment: .firstTextBaseline, spacing: 18) {
+            ForEach(ClipFilter.allCases, id: \.self) { f in
+                FilterTab(title: f.rawValue, selected: filter == f) {
+                    withAnimation(Motion.quick) { filter = f }
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 180)
             Spacer()
-            Menu {
-                Toggle("自动记录剪贴板", isOn: $settings.clipboardEnabled)
-                Divider()
-                Button("清空历史…") { confirmClear = true }
+            Button {
+                withAnimation(Motion.quick) { settings.clipboardEnabled.toggle() }
             } label: {
-                Image(systemName: "ellipsis")
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(settings.clipboardEnabled ? Palette.saved : Palette.faint)
+                        .frame(width: 6, height: 6)
+                    Text(settings.clipboardEnabled ? "记录中" : "已暂停")
+                }
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .tint(Palette.ink2)
-            .help("更多")
+            .buttonStyle(.plain)
+            .help(settings.clipboardEnabled ? "点击暂停自动记录" : "点击恢复自动记录")
+            Button("清空") { confirmClear = true }
+                .buttonStyle(.plain)
+                .help("清空历史（保留置顶）")
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+        .font(.system(size: 12.5))
+        .foregroundStyle(Palette.muted)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 6)
     }
 
     private func header(_ title: String) -> some View {
@@ -201,14 +206,14 @@ struct ClipCard: View {
         let terms = SearchText.terms(query)
         VStack(alignment: .leading, spacing: 6) {
             if clip.isImage, let url = store.clipImageURL(clip) {
-                HStack(alignment: .top, spacing: 14) {
-                    PhotoPrint(url: url, width: 132, height: 92, tilt: -1.5)
+                VStack(alignment: .leading, spacing: 8) {
+                    PhotoPrint(url: url, width: 168, height: 112, tilt: -1.2)
                         .padding(.vertical, 4)
                     if !clip.text.isEmpty {
-                        Text(SearchText.highlight(SearchText.snippet(clip.text, terms: terms, radius: 40), terms: terms))
+                        Text(SearchText.highlight(SearchText.snippet(clip.text.replacingOccurrences(of: "\n", with: " "), terms: terms, radius: 40), terms: terms))
                             .font(.system(size: 12.5))
                             .foregroundStyle(Palette.ink2)
-                            .lineLimit(4)
+                            .lineLimit(2)
                     }
                 }
             } else {
@@ -440,5 +445,27 @@ struct SearchResultsView: View {
                 EmptyStateView(title: "没有找到", detail: "换个关键词试试，或用 #标签 搜索")
             }
         }
+    }
+}
+
+/// 文字筛选标签：选中加粗，下方一笔朱砂
+private struct FilterTab: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Text(title)
+                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Palette.ink : Palette.muted)
+                Capsule()
+                    .fill(selected ? Palette.seal : Color.clear)
+                    .frame(width: 14, height: 2)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
