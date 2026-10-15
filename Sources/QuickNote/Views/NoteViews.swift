@@ -734,3 +734,25 @@ struct IconMenu<Content: View>: View {
         .help(help)
     }
 }
+
+/// 工具栏图标按钮：与 IconMenu 同尺寸、同悬停效果
+struct IconButton: View {
+    let systemImage: String
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14))
+                .foregroundStyle(Palette.ink2)
+                .frame(width: 32, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hovering ? Palette.field : Color.clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(Motion.quick) { hovering = h } }
+        .help(help)
+    }
+}

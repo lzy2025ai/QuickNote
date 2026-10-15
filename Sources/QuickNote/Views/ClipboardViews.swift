@@ -267,17 +267,19 @@ struct ClipDetailView: View {
     var body: some View {
         if let clip = store.clips.first(where: { $0.id == clipID }) {
             VStack(alignment: .leading, spacing: 0) {
-                Color.clear.frame(height: Metrics.titlebarHeight + 12)
+                actionBar(clip)
+                    .frame(height: Metrics.titlebarHeight + 12)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        HStack(alignment: .lastTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack(alignment: .lastTextBaseline, spacing: 14) {
                             Text(ChineseDate.time(clip.createdAt))
                                 .font(.numeral(56, weight: .regular))
                                 .foregroundStyle(Palette.ink)
                             Text(ChineseDate.dayHeader(clip.createdAt))
-                                .font(.song(14))
+                                .font(.song(15))
                                 .tracking(3)
-                                .foregroundStyle(Palette.muted)
+                                .foregroundStyle(Palette.ink)
+                            Spacer()
                         }
                         Rectangle().fill(Palette.ink).frame(height: 1).opacity(0.85)
 
@@ -289,13 +291,16 @@ struct ClipDetailView: View {
                                 .shadow(color: Palette.shadow, radius: 10, y: 4)
                                 .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
                                 .help("双击用“预览”打开")
+                                .padding(.top, 4)
                             if !clip.text.isEmpty {
-                                SectionLabel("识别出的文字")
-                                Text(clip.text)
+                                SectionLabel("识别出的文字").padding(.top, 8)
+                                // 识别结果按行排开太长，合并成段落便于阅读
+                                Text(clip.text.replacingOccurrences(of: "\n", with: "  "))
                                     .font(.song(14))
-                                    .lineSpacing(5)
+                                    .lineSpacing(6)
                                     .foregroundStyle(Palette.ink2)
                                     .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         } else {
                             Text(clip.text)
@@ -305,96 +310,73 @@ struct ClipDetailView: View {
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-
-                        actions(clip)
-                            .padding(.top, 6)
                     }
                     .padding(.horizontal, Metrics.editorInset)
                     .padding(.bottom, 24)
-                    .frame(maxWidth: Metrics.readableWidth, alignment: .leading)
                 }
-                HStack {
-                    if let app = clip.sourceApp { Text("来自 \(app)") }
-                    Spacer()
-                    Text("密码等敏感内容不会被记录")
-                }
-                .font(.system(size: 11))
-                .tracking(1)
-                .foregroundStyle(Palette.muted)
-                .padding(.horizontal, Metrics.editorInset)
-                .frame(height: 38)
+                footer(clip)
             }
+            .frame(maxWidth: Metrics.readableWidth, alignment: .leading)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .background(Palette.paper)
         }
     }
 
-    private func actions(_ clip: ClipItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
+    /// 与笔记编辑器一致：右上角三个图标——拷贝、存为笔记、更多
+    private func actionBar(_ clip: ClipItem) -> some View {
+        HStack(spacing: 4) {
+            Spacer()
+            IconButton(systemImage: copied ? "checkmark" : "doc.on.doc", help: clip.isImage ? "拷贝图片（双击条目也可拷贝）" : "拷贝（双击条目也可拷贝）") {
                 store.copyClip(clip)
                 withAnimation(Motion.quick) { copied = true }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                     withAnimation(Motion.quick) { copied = false }
                 }
-            } label: {
-                HStack {
-                    Text(copied ? "已拷贝" : (clip.isImage ? "拷贝图片" : "拷贝"))
-                    Spacer()
-                    Text("双击条目也可拷贝").font(.system(size: 11)).opacity(0.7)
-                }
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Palette.onButton)
-                .padding(.horizontal, 14)
-                .frame(height: 38)
-                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.button))
             }
-            .buttonStyle(.plain)
-
-            HStack(spacing: 8) {
-                Menu {
-                    Button("收件箱") { onSavedAsNote(store.saveClipAsNote(clip, projectID: nil)) }
-                    Divider()
-                    ForEach(store.projects) { p in
-                        Button(p.name) { onSavedAsNote(store.saveClipAsNote(clip, projectID: p.id)) }
-                    }
-                } label: {
-                    Text("存为笔记…")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Palette.ink)
+            IconMenu(systemImage: "note.text.badge.plus", help: "存为笔记") {
+                Button("存到收件箱") { onSavedAsNote(store.saveClipAsNote(clip, projectID: nil)) }
+                Divider()
+                ForEach(store.projects) { p in
+                    Button("存到 " + p.name) { onSavedAsNote(store.saveClipAsNote(clip, projectID: p.id)) }
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .tint(Palette.ink)
-                .padding(.horizontal, 14)
-                .frame(height: 38)
-                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.field))
-
-                Menu {
-                    if clip.isImage && !clip.text.isEmpty {
-                        Button("拷贝识别出的文字") { Pasteboard.copy(clip.text) }
-                    }
-                    if clip.isImage, let url = store.clipImageURL(clip) {
-                        Button("存储图片为…") { saveImage(url) }
-                    }
-                    Button(clip.pinned ? "取消置顶" : "置顶") {
-                        withAnimation(Motion.standard) { store.toggleClipPin(clip.id) }
-                    }
-                    Divider()
-                    Button("删除", role: .destructive) { store.deleteClip(clip.id) }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .foregroundStyle(Palette.ink)
+            }
+            IconMenu(systemImage: "ellipsis", help: "更多") {
+                if clip.isImage && !clip.text.isEmpty {
+                    Button("拷贝识别出的文字") { Pasteboard.copy(clip.text) }
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .tint(Palette.ink)
-                .frame(width: 44, height: 38)
-                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.field))
-                .help("更多")
+                if clip.isImage, let url = store.clipImageURL(clip) {
+                    Button("存储图片为…") { saveImage(url) }
+                }
+                Button(clip.pinned ? "取消置顶" : "置顶") {
+                    withAnimation(Motion.standard) { store.toggleClipPin(clip.id) }
+                }
+                Divider()
+                Button("删除", role: .destructive) { store.deleteClip(clip.id) }
             }
         }
-        .frame(maxWidth: 360)
+        .padding(.horizontal, 18)
+        .padding(.top, 6)
+    }
+
+    /// 与笔记编辑器一致：右下角一行淡淡的信息
+    private func footer(_ clip: ClipItem) -> some View {
+        HStack(spacing: 6) {
+            Spacer()
+            if let app = clip.sourceApp {
+                Text("来自 \(app)")
+                Text("·").foregroundStyle(Palette.faint)
+            }
+            if clip.isImage {
+                Text(verbatim: "\(clip.imageWidth ?? 0) × \(clip.imageHeight ?? 0)")
+            } else {
+                Text(verbatim: "\(clip.text.count) 字")
+            }
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(Palette.muted.opacity(0.8))
+        .padding(.horizontal, Metrics.editorInset)
+        .padding(.bottom, 12)
+        .frame(height: 36, alignment: .bottom)
     }
 
     private func saveImage(_ url: URL) {
