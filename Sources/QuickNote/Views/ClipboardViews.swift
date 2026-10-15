@@ -21,16 +21,26 @@ struct ClipListView: View {
             case .image: return c.isImage
             }
         }
+        let pinned = clips.filter(\.pinned)
+        let others = clips.filter { !$0.pinned }
         List(selection: $detail) {
-            ForEach(clips) { clip in
-                ClipRow(clip: clip).tag(Detail.clip(clip.id))
+            if pinned.isEmpty {
+                clipRows(others)
+            } else {
+                Section("置顶") { clipRows(pinned) }
+                if !others.isEmpty {
+                    Section("最近") { clipRows(others) }
+                }
             }
         }
         .listStyle(.inset)
+        .animation(Motion.standard, value: clips.map(\.id))
         .contextMenu(forSelectionType: Detail.self) { items in
             if let clip = clip(from: items) {
                 Button("拷贝") { copy(clip) }
-                Button(clip.pinned ? "取消置顶" : "置顶") { store.toggleClipPin(clip.id) }
+                Button(clip.pinned ? "取消置顶" : "置顶") {
+                    withAnimation(Motion.standard) { store.toggleClipPin(clip.id) }
+                }
                 Divider()
                 Button("删除", role: .destructive) { store.deleteClip(clip.id) }
             }
@@ -79,6 +89,12 @@ struct ClipListView: View {
         }
     }
 
+    private func clipRows(_ clips: [ClipItem]) -> some View {
+        ForEach(clips) { clip in
+            ClipRow(clip: clip).tag(Detail.clip(clip.id))
+        }
+    }
+
     private func clip(from items: Set<Detail>) -> ClipItem? {
         guard case .clip(let id)? = items.first else { return nil }
         return store.clips.first { $0.id == id }
@@ -103,29 +119,23 @@ struct ClipRow: View {
             if clip.isImage, let url = store.clipImageURL(clip) {
                 ThumbnailView(url: url, maxPixel: 200)
                     .frame(width: 56, height: 42)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.04)))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.08)))
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
             }
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    if clip.pinned {
-                        Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.orange)
-                    }
-                    Text(primaryText(terms))
-                        .font(.system(size: 13))
-                        .foregroundStyle(clip.isImage && clip.text.isEmpty ? Color.secondary : Color.primary)
-                        .lineLimit(2)
-                }
+                Text(primaryText(terms))
+                    .font(Typography.rowDetail)
+                    .foregroundStyle(clip.isImage && clip.text.isEmpty ? Color.secondary : Color.primary)
+                    .lineLimit(2)
                 HStack(spacing: 4) {
                     Text(RelativeDate.short(clip.createdAt))
                     if let app = clip.sourceApp { Text("· \(app)") }
                 }
-                .font(.system(size: 11))
+                .font(Typography.meta)
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, Metrics.rowVerticalPadding)
     }
 
     private func primaryText(_ terms: [String]) -> AttributedString {
@@ -154,10 +164,12 @@ struct ClipDetailView: View {
                     ScrollView {
                         Text(clip.text)
                             .font(.system(size: 14))
-                            .lineSpacing(3)
+                            .lineSpacing(4)
                             .textSelection(.enabled)
+                            .frame(maxWidth: Metrics.readableWidth, alignment: .leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(24)
+                            .padding(.horizontal, Metrics.editorInset)
+                            .padding(.vertical, 20)
                     }
                 }
                 Divider()
@@ -171,36 +183,30 @@ struct ClipDetailView: View {
                         Text("\(clip.text.count) 字")
                     }
                 }
-                .font(.system(size: 11))
+                .font(Typography.meta)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
+                .padding(.horizontal, Metrics.editorInset)
+                .padding(.vertical, 8)
             }
             .background(Color(nsColor: .textBackgroundColor))
             .toolbar { toolbar(clip) }
         }
     }
 
+    /// 工具栏只放“拷贝”和“存为笔记”，其余收进“更多”
     @ToolbarContentBuilder
     private func toolbar(_ clip: ClipItem) -> some ToolbarContent {
         ToolbarItemGroup {
             Button {
                 store.copyClip(clip)
-                copied = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+                withAnimation(Motion.quick) { copied = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    withAnimation(Motion.quick) { copied = false }
+                }
             } label: {
                 Label(copied ? "已拷贝" : "拷贝", systemImage: copied ? "checkmark" : "doc.on.doc")
             }
             .help(clip.isImage ? "拷贝图片" : "拷贝")
-
-            if clip.isImage && !clip.text.isEmpty {
-                Button {
-                    Pasteboard.copy(clip.text)
-                } label: {
-                    Label("拷贝识别的文字", systemImage: "text.viewfinder")
-                }
-                .help("拷贝图片中识别出的文字")
-            }
 
             Menu {
                 Button("收件箱") { onSavedAsNote(store.saveClipAsNote(clip, projectID: nil)) }
@@ -213,28 +219,22 @@ struct ClipDetailView: View {
             }
             .help("存为笔记")
 
-            if clip.isImage, let url = store.clipImageURL(clip) {
-                Button {
-                    saveImage(url)
-                } label: {
-                    Label("存储为…", systemImage: "square.and.arrow.down")
+            Menu {
+                if clip.isImage && !clip.text.isEmpty {
+                    Button("拷贝识别出的文字") { Pasteboard.copy(clip.text) }
                 }
-                .help("把图片存储为文件")
-            }
-
-            Button {
-                store.toggleClipPin(clip.id)
+                if clip.isImage, let url = store.clipImageURL(clip) {
+                    Button("存储图片为…") { saveImage(url) }
+                }
+                Button(clip.pinned ? "取消置顶" : "置顶") {
+                    withAnimation(Motion.standard) { store.toggleClipPin(clip.id) }
+                }
+                Divider()
+                Button("删除", role: .destructive) { store.deleteClip(clip.id) }
             } label: {
-                Label(clip.pinned ? "取消置顶" : "置顶", systemImage: clip.pinned ? "pin.slash" : "pin")
+                Label("更多", systemImage: "ellipsis.circle")
             }
-            .help(clip.pinned ? "取消置顶" : "置顶（不会被自动清理）")
-
-            Button {
-                store.deleteClip(clip.id)
-            } label: {
-                Label("删除", systemImage: "trash")
-            }
-            .help("删除")
+            .help("更多")
         }
     }
 
@@ -248,17 +248,21 @@ struct ClipDetailView: View {
                     .help("双击用“预览”打开")
                 if !clip.text.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("识别到的文字")
-                            .font(.system(size: 11, weight: .medium))
+                        Text("识别出的文字")
+                            .font(Typography.meta.weight(.medium))
                             .foregroundStyle(.secondary)
                         Text(clip.text)
-                            .font(.system(size: 13))
+                            .font(.callout)
+                            .lineSpacing(3)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
-            .padding(24)
+            .frame(maxWidth: Metrics.readableWidth)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, Metrics.editorInset)
+            .padding(.vertical, 20)
         }
     }
 

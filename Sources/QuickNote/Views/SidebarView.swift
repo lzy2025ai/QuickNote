@@ -69,7 +69,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 6) {
                 if !store.syncStatus.isEmpty {
                     Label(store.syncStatus, systemImage: store.isICloud ? "icloud" : "externaldrive")
-                        .font(.system(size: 11))
+                        .font(Typography.meta)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

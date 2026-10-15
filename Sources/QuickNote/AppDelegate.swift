@@ -91,16 +91,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .qnShowClipboard, object: nil)
     }
 
+    /// 每次显示 / 隐藏递增，用来让被打断的隐藏动画不再收尾
+    private var transitionID = 0
+
     @objc func showWindow() {
+        transitionID += 1
+        let wasOnScreen = window.isVisible && !NSApp.isHidden && window.alphaValue > 0.99
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if wasOnScreen {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        // 轻微淡入
+        window.alphaValue = 0
         window.makeKeyAndOrderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            self.window.animator().alphaValue = 1
+        }
+        // 呼出后如果没有正在编辑的地方，直接把光标放进搜索框，马上就能打字
+        DispatchQueue.main.async {
+            if self.window.firstResponder === self.window, let field = self.findSearchField() {
+                self.window.makeFirstResponder(field)
+            }
+        }
     }
 
     @objc func hideWindow() {
-        window.orderOut(nil)
-        // 把焦点还给之前的应用
-        NSApp.hide(nil)
+        transitionID += 1
+        let id = transitionID
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.12
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            self.window.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self, self.transitionID == id else { return }
+            self.window.orderOut(nil)
+            self.window.alphaValue = 1
+            // 把焦点还给之前的应用
+            NSApp.hide(nil)
+        })
     }
 
     @objc private func dockIconChanged() {

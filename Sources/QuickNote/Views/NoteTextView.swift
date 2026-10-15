@@ -31,9 +31,9 @@ struct NoteTextView: NSViewRepresentable {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
-        textView.textContainerInset = NSSize(width: 20, height: 12)
+        textView.textContainerInset = NSSize(width: Metrics.textViewInset, height: 8)
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 3
+        paragraph.lineSpacing = 4
         textView.defaultParagraphStyle = paragraph
         textView.typingAttributes[.paragraphStyle] = paragraph
         context.coordinator.textView = textView
