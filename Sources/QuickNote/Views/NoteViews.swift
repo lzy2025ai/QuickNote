@@ -404,20 +404,25 @@ struct NoteEditorView: View {
         .padding(.top, 6)
     }
 
+    /// 右下角一行淡淡的状态：字数 · 保存位置
     private var footer: some View {
-        HStack {
-            HStack(spacing: 7) {
-                Circle().fill(Palette.saved).frame(width: 6, height: 6)
-                Text(commitWork == nil ? (store.isICloud ? "已存 · iCloud" : "已存 · 本机") : "编辑中…")
-            }
+        HStack(spacing: 6) {
             Spacer()
             Text(verbatim: String(draft.content.filter { !$0.isWhitespace }.count) + " 字")
+            Text("·").foregroundStyle(Palette.faint)
+            HStack(spacing: 4) {
+                Image(systemName: store.isICloud ? "icloud" : "internaldrive")
+                    .font(.system(size: 10))
+                Text(commitWork == nil ? "已保存" : "保存中")
+            }
+            .animation(Motion.quick, value: commitWork == nil)
         }
         .font(.system(size: 11))
-        .tracking(1)
-        .foregroundStyle(Palette.muted)
+        .foregroundStyle(Palette.muted.opacity(0.8))
         .padding(.horizontal, Metrics.editorInset)
-        .frame(height: 38)
+        .padding(.bottom, 12)
+        .frame(height: 36, alignment: .bottom)
+        .help(store.isICloud ? "已保存到 iCloud 云盘" : "已保存在本机")
     }
 
     private func addAttachment(fileURL: URL) {
