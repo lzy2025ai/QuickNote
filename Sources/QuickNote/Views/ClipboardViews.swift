@@ -98,7 +98,7 @@ struct ClipListView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .foregroundStyle(Palette.ink2)
+            .tint(Palette.ink2)
             .help("更多")
         }
         .padding(.horizontal, 20)
@@ -227,9 +227,9 @@ struct ClipCard: View {
                 }
                 if let app = clip.sourceApp { Text("来自 \(app)") }
                 if clip.isImage {
-                    Text("\(clip.imageWidth ?? 0) × \(clip.imageHeight ?? 0)")
+                    Text(verbatim: "\(clip.imageWidth ?? 0) × \(clip.imageHeight ?? 0)")
                 } else {
-                    Text("\(clip.text.count) 字")
+                    Text(verbatim: "\(clip.text.count) 字")
                 }
             }
             .font(.system(size: 11))
@@ -360,6 +360,7 @@ struct ClipDetailView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
+                .tint(Palette.ink)
                 .padding(.horizontal, 14)
                 .frame(height: 38)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.field))
@@ -382,6 +383,7 @@ struct ClipDetailView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
+                .tint(Palette.ink)
                 .frame(width: 44, height: 38)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Palette.field))
                 .help("更多")

@@ -350,7 +350,7 @@ struct NoteEditorView: View {
                     .font(.song(15))
                     .tracking(3)
                     .foregroundStyle(Palette.ink)
-                Text("\(Calendar.current.component(.year, from: draft.createdAt)) · \(ChineseDate.time(draft.createdAt))")
+                Text(verbatim: String(Calendar.current.component(.year, from: draft.createdAt)) + " · " + ChineseDate.time(draft.createdAt))
                     .font(.system(size: 11.5))
                     .tracking(2)
                     .foregroundStyle(Palette.muted)
@@ -359,11 +359,11 @@ struct NoteEditorView: View {
         }
     }
 
-    /// 右上角：添加图片、分享、更多
+    /// 右上角：添加图片、分享、更多（紧凑排在右侧）
     private var actionBar: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 4) {
             Spacer()
-            Menu {
+            IconMenu(systemImage: "photo", help: "添加图片（也可以直接拖进来）") {
                 Button("选择图片…") { pickImages() }
                 Button("粘贴剪贴板中的图片") {
                     if let png = Pasteboard.imagePNGData(), let name = store.importAttachment(pngData: png) {
@@ -371,12 +371,8 @@ struct NoteEditorView: View {
                         commitNow()
                     }
                 }
-            } label: {
-                Image(systemName: "photo")
             }
-            .help("添加图片（也可以直接拖进来）")
-
-            Menu {
+            IconMenu(systemImage: "square.and.arrow.up", help: "拷贝 / 导出") {
                 Button("拷贝全部内容") { Pasteboard.copy(draft.plainText) }
                 Button("拷贝为 Markdown") {
                     Pasteboard.copy(MarkdownExporter.markdown(for: draft, projectName: store.project(draft.projectID)?.name))
@@ -386,12 +382,8 @@ struct NoteEditorView: View {
                     commitNow()
                     MarkdownExporter.exportNote(draft, store: store)
                 }
-            } label: {
-                Image(systemName: "square.and.arrow.up")
             }
-            .help("拷贝 / 导出")
-
-            Menu {
+            IconMenu(systemImage: "ellipsis", help: "更多") {
                 Button(draft.pinned ? "取消置顶" : "置顶") {
                     withAnimation(Motion.standard) {
                         note.wrappedValue.pinned.toggle()
@@ -406,17 +398,9 @@ struct NoteEditorView: View {
                 }
                 Divider()
                 Button("删除这则笔记…", role: .destructive) { confirmDelete = true }
-            } label: {
-                Image(systemName: "ellipsis")
             }
-            .help("更多")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize(horizontal: false, vertical: true)
-        .foregroundStyle(Palette.ink2)
-        .font(.system(size: 15))
-        .padding(.horizontal, 22)
+        .padding(.horizontal, 18)
         .padding(.top, 6)
     }
 
@@ -427,7 +411,7 @@ struct NoteEditorView: View {
                 Text(commitWork == nil ? (store.isICloud ? "已存 · iCloud" : "已存 · 本机") : "编辑中…")
             }
             Spacer()
-            Text("\(draft.content.filter { !$0.isWhitespace }.count) 字")
+            Text(verbatim: String(draft.content.filter { !$0.isWhitespace }.count) + " 字")
         }
         .font(.system(size: 11))
         .tracking(1)
@@ -489,7 +473,7 @@ struct TagsEditor: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .foregroundStyle(Palette.faint)
+                .tint(Palette.faint)
                 .help("选择已有标签")
             }
             Spacer(minLength: 0)
@@ -642,6 +626,7 @@ struct FieldActions: View {
         .buttonStyle(.borderless)
         .font(.system(size: 12))
         .foregroundStyle(Palette.muted)
+        .tint(Palette.muted)
     }
 }
 
@@ -715,5 +700,29 @@ private struct FieldRow: View {
 
     private var valueFont: Font {
         isNumeric ? .numeral(17, weight: .semibold) : .system(size: 14, weight: .medium)
+    }
+}
+
+/// 工具栏图标菜单：紧凑、不撑满，图标用墨色而不是强调色
+struct IconMenu<Content: View>: View {
+    let systemImage: String
+    let help: String
+    @ViewBuilder let content: () -> Content
+    @State private var hovering = false
+
+    var body: some View {
+        Menu(content: content) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .tint(Palette.ink2)
+        .frame(width: 32, height: 28)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(hovering ? Palette.field : Color.clear))
+        .contentShape(Rectangle())
+        .onHover { h in withAnimation(Motion.quick) { hovering = h } }
+        .help(help)
     }
 }
