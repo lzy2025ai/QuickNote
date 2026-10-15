@@ -20,24 +20,7 @@ struct NoteListView: View {
 
     var body: some View {
         let notes = store.notes(for: scope)
-        VStack(spacing: 0) {
-            ColumnHeader(title: title, count: notes.count) {
-                Button {
-                    MarkdownExporter.exportNotes(notes, title: title, store: store)
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                }
-                .buttonStyle(.borderless)
-                .help("把这些笔记导出为 Markdown")
-                .disabled(notes.isEmpty)
-
-                Button(action: onCreate) {
-                    Image(systemName: "square.and.pencil")
-                }
-                .buttonStyle(.borderless)
-                .help("新建笔记 (⌘N)")
-            }
-            Divider()
+        ScrollViewReader { proxy in
             List(selection: $detail) {
                 ForEach(notes) { note in
                     NoteRow(note: note, showProject: true)
@@ -54,6 +37,30 @@ struct NoteListView: View {
                         Text("还没有笔记").foregroundStyle(.secondary)
                         Button("新建笔记", action: onCreate)
                     }
+                }
+            }
+            // 选中项变化（比如新建笔记）时滚动到它，避免被遮住
+            .onChange(of: detail) { newValue in
+                if case .note(let id)? = newValue {
+                    withAnimation { proxy.scrollTo(id) }
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                ColumnHeader(title: title, count: notes.count) {
+                    Button {
+                        MarkdownExporter.exportNotes(notes, title: title, store: store)
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("把这些笔记导出为 Markdown")
+                    .disabled(notes.isEmpty)
+
+                    Button(action: onCreate) {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("新建笔记 (⌘N)")
                 }
             }
         }
@@ -74,6 +81,8 @@ struct ColumnHeader<Trailing: View>: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 38)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 
@@ -134,7 +143,11 @@ struct NoteRow: View {
                     .foregroundStyle(.tertiary)
                 if showProject {
                     if let p = store.project(note.projectID) {
-                        Label(p.name, systemImage: p.icon).foregroundStyle(.tertiary)
+                        Label {
+                            Text(p.name).foregroundStyle(.tertiary)
+                        } icon: {
+                            Image(systemName: p.icon).foregroundStyle(p.tint.opacity(0.8))
+                        }
                     }
                 }
                 if !note.tags.isEmpty {
@@ -153,6 +166,7 @@ struct NoteRow: View {
 struct NoteEditorView: View {
     @EnvironmentObject var store: Store
     let noteID: UUID
+    var autoFocusTitle = false
 
     @FocusState private var titleFocused: Bool
     @State private var copied = false
@@ -215,8 +229,14 @@ struct NoteEditorView: View {
         }
         .onAppear {
             let n = note.wrappedValue
-            if n.title.isEmpty && n.content.isEmpty && n.fields.isEmpty {
-                DispatchQueue.main.async { titleFocused = true }
+            if autoFocusTitle || (n.title.isEmpty && n.content.isEmpty && n.fields.isEmpty) {
+                DispatchQueue.main.async {
+                    titleFocused = true
+                    // 选中默认标题，直接输入即可替换
+                    DispatchQueue.main.async {
+                        NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                    }
+                }
             }
         }
         .alert("删除这条笔记？", isPresented: $confirmDelete) {

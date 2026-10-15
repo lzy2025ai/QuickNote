@@ -21,52 +21,31 @@ struct ClipListView: View {
             case .image: return c.isImage
             }
         }
-        VStack(spacing: 0) {
-            ColumnHeader(title: "剪贴板历史", count: clips.count) {
-                Toggle("记录", isOn: $settings.clipboardEnabled)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .help("暂停 / 恢复记录剪贴板")
-                Button {
-                    confirmClear = true
-                } label: {
-                    Image(systemName: "trash")
+        clipList(clips)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                ColumnHeader(title: "剪贴板历史", count: clips.count) {
+                    Toggle("记录", isOn: $settings.clipboardEnabled)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .help("暂停 / 恢复记录剪贴板")
+                    Button {
+                        confirmClear = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("清空历史（保留置顶）")
                 }
-                .buttonStyle(.borderless)
-                .help("清空历史（保留置顶）")
-            }
-            Picker("", selection: $filter) {
-                ForEach(ClipFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
-            Divider()
-            List(selection: $detail) {
-                ForEach(clips) { clip in
-                    ClipRow(clip: clip).tag(Detail.clip(clip.id))
+                Picker("", selection: $filter) {
+                    ForEach(ClipFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-            }
-            .contextMenu(forSelectionType: Detail.self) { items in
-                if let clip = clip(from: items) {
-                    Button("复制") { copy(clip) }
-                    Button(clip.pinned ? "取消置顶" : "置顶") { store.toggleClipPin(clip.id) }
-                    Divider()
-                    Button("删除", role: .destructive) { store.deleteClip(clip.id) }
-                }
-            } primaryAction: { items in
-                // 双击 / 回车：复制
-                if let clip = clip(from: items) { copy(clip) }
-            }
-            .onDeleteCommand {
-                if case .clip(let id) = detail { store.deleteClip(id) }
-            }
-            .overlay {
-                if clips.isEmpty {
-                    Text(settings.clipboardEnabled ? "复制点什么，就会自动出现在这里" : "剪贴板记录已暂停")
-                        .foregroundStyle(.secondary)
-                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.bar)
+                .overlay(alignment: .bottom) { Divider() }
             }
         }
         .alert("清空剪贴板历史？", isPresented: $confirmClear) {
@@ -74,6 +53,34 @@ struct ClipListView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("置顶的条目会保留。")
+        }
+    }
+
+    private func clipList(_ clips: [ClipItem]) -> some View {
+        List(selection: $detail) {
+            ForEach(clips) { clip in
+                ClipRow(clip: clip).tag(Detail.clip(clip.id))
+            }
+        }
+        .contextMenu(forSelectionType: Detail.self) { items in
+            if let clip = clip(from: items) {
+                Button("复制") { copy(clip) }
+                Button(clip.pinned ? "取消置顶" : "置顶") { store.toggleClipPin(clip.id) }
+                Divider()
+                Button("删除", role: .destructive) { store.deleteClip(clip.id) }
+            }
+        } primaryAction: { items in
+            // 双击 / 回车：复制
+            if let clip = clip(from: items) { copy(clip) }
+        }
+        .onDeleteCommand {
+            if case .clip(let id) = detail { store.deleteClip(id) }
+        }
+        .overlay {
+            if clips.isEmpty {
+                Text(settings.clipboardEnabled ? "复制点什么，就会自动出现在这里" : "剪贴板记录已暂停")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -274,32 +281,31 @@ struct SearchResultsView: View {
     var body: some View {
         let notes = store.searchNotes(query)
         let clips = store.searchClips(query)
-        VStack(spacing: 0) {
+        List(selection: $detail) {
+            if !notes.isEmpty {
+                Section("笔记 · \(notes.count)") {
+                    ForEach(notes) { n in
+                        NoteRow(note: n, showProject: true, query: query)
+                            .tag(Detail.note(n.id))
+                            .contextMenu { NoteContextMenu(note: n) }
+                    }
+                }
+            }
+            if !clips.isEmpty {
+                Section("剪贴板 · \(clips.count)") {
+                    ForEach(clips) { c in
+                        ClipRow(clip: c, query: query).tag(Detail.clip(c.id))
+                    }
+                }
+            }
+        }
+        .overlay {
+            if notes.isEmpty && clips.isEmpty {
+                Text("没有找到“\(query)”").foregroundStyle(.secondary)
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
             ColumnHeader(title: "搜索结果", count: notes.count + clips.count) { EmptyView() }
-            Divider()
-            List(selection: $detail) {
-                if !notes.isEmpty {
-                    Section("笔记 · \(notes.count)") {
-                        ForEach(notes) { n in
-                            NoteRow(note: n, showProject: true, query: query)
-                                .tag(Detail.note(n.id))
-                                .contextMenu { NoteContextMenu(note: n) }
-                        }
-                    }
-                }
-                if !clips.isEmpty {
-                    Section("剪贴板 · \(clips.count)") {
-                        ForEach(clips) { c in
-                            ClipRow(clip: c, query: query).tag(Detail.clip(c.id))
-                        }
-                    }
-                }
-            }
-            .overlay {
-                if notes.isEmpty && clips.isEmpty {
-                    Text("没有找到“\(query)”").foregroundStyle(.secondary)
-                }
-            }
         }
     }
 }

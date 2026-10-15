@@ -18,6 +18,7 @@ extension Notification.Name {
     static let qnNewProject = Notification.Name("qn.newProject")
     static let qnFocusSearch = Notification.Name("qn.focusSearch")
     static let qnShowClipboard = Notification.Name("qn.showClipboard")
+    static let qnToggleSidebar = Notification.Name("qn.toggleSidebar")
     static let qnHideWindow = Notification.Name("qn.hideWindow")
     static let qnDockIconChanged = Notification.Name("qn.dockIconChanged")
 }

@@ -10,7 +10,7 @@ struct SettingsView: View {
             ClipboardSettings().tabItem { Label("剪贴板", systemImage: "doc.on.clipboard") }
             SyncSettings().tabItem { Label("同步与数据", systemImage: "icloud") }
         }
-        .frame(width: 540, height: 430)
+        .frame(width: 560, height: 480)
     }
 }
 
@@ -41,6 +41,15 @@ private struct GeneralSettings: View {
                     Text(loginError).font(.caption).foregroundStyle(.red)
                 }
                 Text("建议开启：App 在后台运行时才能持续记录剪贴板。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("新建笔记的默认标题", selection: $settings.noteTitleStyle) {
+                    ForEach(NoteTitleStyle.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.radioGroup)
+                Text("新建后标题会自动选中，直接输入就能替换。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

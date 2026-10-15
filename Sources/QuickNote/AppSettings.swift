@@ -1,6 +1,19 @@
 import Foundation
 import Carbon
 
+/// 新建笔记时自动生成的标题
+enum NoteTitleStyle: String, CaseIterable, Identifiable {
+    case dateTime, projectDate, empty
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .dateTime: return "日期时间（如“10月15日 19:40”）"
+        case .projectDate: return "项目名 + 日期时间（如“乐享户外 · 10月15日 19:40”）"
+        case .empty: return "留空（列表里显示正文第一行）"
+        }
+    }
+}
+
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
     private let defaults = UserDefaults.standard
@@ -20,6 +33,9 @@ final class AppSettings: ObservableObject {
         }
     }
     @Published private(set) var storageLocation: StorageLocation
+    @Published var noteTitleStyle: NoteTitleStyle {
+        didSet { defaults.set(noteTitleStyle.rawValue, forKey: "noteTitleStyle") }
+    }
 
     private init() {
         defaults.register(defaults: [
@@ -30,6 +46,7 @@ final class AppSettings: ObservableObject {
             "hideAfterCopy": true,
             "showDockIcon": true,
             "storageLocation": StorageLocation.local.rawValue,
+            "noteTitleStyle": NoteTitleStyle.dateTime.rawValue,
         ])
         clipboardEnabled = defaults.bool(forKey: "clipboardEnabled")
         recordImages = defaults.bool(forKey: "recordImages")
@@ -38,6 +55,7 @@ final class AppSettings: ObservableObject {
         hideAfterCopy = defaults.bool(forKey: "hideAfterCopy")
         showDockIcon = defaults.bool(forKey: "showDockIcon")
         storageLocation = StorageLocation(rawValue: defaults.string(forKey: "storageLocation") ?? "") ?? .local
+        noteTitleStyle = NoteTitleStyle(rawValue: defaults.string(forKey: "noteTitleStyle") ?? "") ?? .dateTime
 
         for action in HotKeyAction.allCases {
             if let data = defaults.data(forKey: action.defaultsKey),
@@ -48,6 +66,17 @@ final class AppSettings: ObservableObject {
             } else {
                 hotKeys[action] = action.defaultCombo
             }
+        }
+    }
+
+    func defaultNoteTitle(projectName: String?, date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M月d日 HH:mm"
+        let stamp = formatter.string(from: date)
+        switch noteTitleStyle {
+        case .dateTime: return stamp
+        case .projectDate: return projectName.map { "\($0) · \(stamp)" } ?? stamp
+        case .empty: return ""
         }
     }
 

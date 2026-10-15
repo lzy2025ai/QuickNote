@@ -27,9 +27,12 @@ struct SidebarView: View {
 
                 Section {
                     ForEach(store.projects) { p in
-                        row(p.name, icon: p.icon, item: .project(p.id))
+                        Label { Text(p.name) } icon: { ProjectIcon(project: p) }
+                            .badge(store.noteCount(.project(p.id)))
+                            .tag(SidebarItem.project(p.id))
                             .contextMenu {
                                 Button("编辑项目…") { editingProject = p }
+                                ProjectColorMenu(project: p)
                                 Button("导出为 Markdown…") {
                                     MarkdownExporter.exportNotes(store.notes(for: .project(p.id)), title: p.name, store: store)
                                 }
@@ -173,6 +176,7 @@ struct ProjectEditSheet: View {
 
     @State private var name = ""
     @State private var icon = "folder"
+    @State private var color: ProjectColor?
 
     private let icons = [
         "folder", "briefcase", "person.2", "building.2", "cart", "creditcard",
@@ -189,6 +193,12 @@ struct ProjectEditSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .onSubmit(save)
 
+            Text("颜色").font(.subheadline).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                colorDot(nil)
+                ForEach(ProjectColor.allCases) { colorDot($0) }
+            }
+
             Text("图标").font(.subheadline).foregroundStyle(.secondary)
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 6), count: 8), spacing: 6) {
                 ForEach(icons, id: \.self) { name in
@@ -196,6 +206,7 @@ struct ProjectEditSheet: View {
                         icon = name
                     } label: {
                         Image(systemName: name)
+                            .foregroundStyle(color?.color ?? .accentColor)
                             .frame(width: 30, height: 30)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
@@ -215,13 +226,33 @@ struct ProjectEditSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 360)
+        .frame(width: 400)
         .onAppear {
             if let project {
                 name = project.name
                 icon = project.icon
+                color = project.projectColor
             }
         }
+    }
+
+    private func colorDot(_ c: ProjectColor?) -> some View {
+        Button {
+            color = c
+        } label: {
+            Circle()
+                .fill(c?.color ?? .accentColor)
+                .frame(width: 18, height: 18)
+                .overlay {
+                    if color == c {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .help(c?.title ?? "默认")
     }
 
     private func save() {
@@ -230,9 +261,10 @@ struct ProjectEditSheet: View {
         if var p = project {
             p.name = trimmed
             p.icon = icon
+            p.color = color?.rawValue
             store.updateProject(p)
         } else {
-            let p = store.addProject(name: trimmed, icon: icon)
+            let p = store.addProject(name: trimmed, icon: icon, color: color?.rawValue)
             onCreate?(p)
         }
         dismiss()

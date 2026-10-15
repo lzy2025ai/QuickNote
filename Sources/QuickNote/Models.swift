@@ -6,10 +6,12 @@ struct Project: Identifiable, Codable, Hashable {
     var id = UUID()
     var name: String
     var icon: String = "folder"
+    /// ProjectColor 的 rawValue；nil 表示默认（强调色）
+    var color: String?
     var createdAt = Date()
     var updatedAt = Date()
 
-    enum CodingKeys: String, CodingKey { case id, name, icon, createdAt, updatedAt }
+    enum CodingKeys: String, CodingKey { case id, name, icon, color, createdAt, updatedAt }
 }
 
 extension Project {
@@ -18,6 +20,7 @@ extension Project {
         id = try c.decode(UUID.self, forKey: .id)
         name = c.value(.name, default: "未命名")
         icon = c.value(.icon, default: "folder")
+        color = try c.decodeIfPresent(String.self, forKey: .color)
         createdAt = c.value(.createdAt, default: Date())
         updatedAt = c.value(.updatedAt, default: createdAt)
     }

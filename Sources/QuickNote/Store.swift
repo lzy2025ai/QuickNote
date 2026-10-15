@@ -313,8 +313,8 @@ final class Store: ObservableObject {
     // MARK: - Projects
 
     @discardableResult
-    func addProject(name: String, icon: String) -> Project {
-        let p = Project(name: name, icon: icon)
+    func addProject(name: String, icon: String, color: String? = nil) -> Project {
+        let p = Project(name: name, icon: icon, color: color)
         projects.append(p)
         return p
     }

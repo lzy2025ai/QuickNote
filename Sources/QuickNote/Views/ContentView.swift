@@ -2,7 +2,11 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var settings: AppSettings
 
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// 刚新建的笔记：编辑器打开时自动聚焦并选中标题，直接输入即可替换默认标题
+    @State private var justCreatedID: UUID?
     @State private var selection: SidebarItem? = .all
     @State private var detail: Detail?
     @State private var searchText = ""
@@ -26,7 +30,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(
                 selection: sidebarSelection,
                 searchText: $searchText,
@@ -34,6 +38,7 @@ struct ContentView: View {
                 showNewProject: $showNewProject
             )
             .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 300)
+            .modifier(HideSidebarToggle())
         } content: {
             contentColumn
                 .navigationSplitViewColumnWidth(min: 260, ideal: 310, max: 450)
@@ -50,6 +55,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .qnNewNote)) { _ in createNote() }
         .onReceive(NotificationCenter.default.publisher(for: .qnNewProject)) { _ in showNewProject = true }
         .onReceive(NotificationCenter.default.publisher(for: .qnFocusSearch)) { _ in searchFocused = true }
+        .onReceive(NotificationCenter.default.publisher(for: .qnToggleSidebar)) { _ in
+            withAnimation { columnVisibility = columnVisibility == .all ? .doubleColumn : .all }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .qnShowClipboard)) { _ in
             sidebarSelection.wrappedValue = .clipboard
             if let first = store.sortedClips.first { detail = .clip(first.id) }
@@ -71,7 +79,7 @@ struct ContentView: View {
     private var detailColumn: some View {
         switch detail {
         case .note(let id)? where store.notes.contains(where: { $0.id == id }):
-            NoteEditorView(noteID: id).id(id)
+            NoteEditorView(noteID: id, autoFocusTitle: id == justCreatedID).id(id)
         case .clip(let id)? where store.clips.contains(where: { $0.id == id }):
             ClipDetailView(clipID: id, onSavedAsNote: openNote)
         default:
@@ -98,13 +106,27 @@ struct ContentView: View {
         case .clipboard?, nil: selection = .all
         default: break
         }
-        let note = store.addNote(projectID: projectID, tags: tags)
+        let title = settings.defaultNoteTitle(projectName: store.project(projectID)?.name)
+        let note = store.addNote(projectID: projectID, title: title, tags: tags)
+        justCreatedID = note.id
         detail = .note(note.id)
     }
 
     private func openNote(_ note: Note) {
+        justCreatedID = nil
         searchText = ""
         selection = note.projectID.map { .project($0) } ?? .inbox
         detail = .note(note.id)
+    }
+}
+
+/// 去掉系统自动加在标题栏上的“收起侧栏”按钮（macOS 14+；改用菜单 显示 › 显示 / 隐藏侧栏 ⌃⌘S）
+private struct HideSidebarToggle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 14.0, *) {
+            content.toolbar(removing: .sidebarToggle)
+        } else {
+            content
+        }
     }
 }

@@ -141,6 +141,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .qnFocusSearch, object: nil)
     }
 
+    @objc func toggleSidebar() {
+        NotificationCenter.default.post(name: .qnToggleSidebar, object: nil)
+    }
+
     @objc func exportAll() {
         MarkdownExporter.exportNotes(store.notes, title: "随手记导出", store: store)
     }
@@ -207,6 +211,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         addSubmenu(editMenu, to: main)
+
+        let viewMenu = NSMenu(title: "显示")
+        viewMenu.addItem(item("显示 / 隐藏侧栏", #selector(toggleSidebar), key: "s", modifiers: [.command, .control]))
+        addSubmenu(viewMenu, to: main)
 
         let windowMenu = NSMenu(title: "窗口")
         windowMenu.addItem(NSMenuItem(title: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
