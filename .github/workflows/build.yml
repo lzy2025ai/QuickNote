@@ -23,6 +23,13 @@ jobs:
           set -o pipefail
           ./build.sh 2>&1 | tee build.log
 
+      - name: Report compiler errors
+        if: failure()
+        run: |
+          grep -E "error:" build.log | sort -u | head -40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
       - name: Verify universal binary
         run: |
           lipo -info build/QuickNote.app/Contents/MacOS/QuickNote
