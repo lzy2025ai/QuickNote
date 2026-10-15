@@ -354,7 +354,7 @@ struct ClipDetailView: View {
                 Button("删除", role: .destructive) { store.deleteClip(clip.id) }
             }
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, Metrics.editorInset - 8)
         .padding(.top, 6)
     }
 
@@ -395,6 +395,7 @@ struct SearchResultsView: View {
     @EnvironmentObject var store: Store
     let query: String
     @Binding var detail: Detail?
+    @State private var pendingDelete: Note?
 
     var body: some View {
         let notes = store.searchNotes(query)
@@ -407,7 +408,7 @@ struct SearchResultsView: View {
                         NoteRow(note: n, selected: detail == .note(n.id), showProject: true, query: query)
                             .contentShape(Rectangle())
                             .onTapGesture { detail = .note(n.id) }
-                            .contextMenu { NoteContextMenu(note: n) }
+                            .contextMenu { NoteContextMenu(note: n) { pendingDelete = $0 } }
                     }
                 }
                 if !clips.isEmpty {
@@ -426,6 +427,10 @@ struct SearchResultsView: View {
             if notes.isEmpty && clips.isEmpty {
                 EmptyStateView(title: "没有找到", detail: "换个关键词试试，或用 #标签 搜索")
             }
+        }
+        .confirmNoteDelete($pendingDelete) { note in
+            if detail == .note(note.id) { detail = nil }
+            store.deleteNote(note.id)
         }
     }
 }

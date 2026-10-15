@@ -119,6 +119,8 @@ final class QuickCaptureController: NSObject, NSWindowDelegate {
         removeKeyMonitor()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, let panel = self.panel, event.window === panel else { return event }
+            // 中文输入法正在组字时，回车 / Tab / Esc 交给输入法（确认拼音、取消组字）
+            if let textView = panel.firstResponder as? NSTextView, textView.hasMarkedText() { return event }
             let flags = event.modifierFlags.intersection([.command, .option, .shift, .control])
             switch event.keyCode {
             case 53: // Esc

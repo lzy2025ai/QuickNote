@@ -27,7 +27,7 @@ enum SettingsPage: CaseIterable {
     var size: CGSize {
         switch self {
         case .general: return CGSize(width: 560, height: 400)
-        case .hotKeys: return CGSize(width: 560, height: 300)
+        case .hotKeys: return CGSize(width: 560, height: 380)
         case .clipboard: return CGSize(width: 560, height: 360)
         case .sync: return CGSize(width: 560, height: 440)
         }

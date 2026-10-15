@@ -53,7 +53,7 @@ struct Note: Identifiable, Codable, Hashable {
     var displayTitle: String {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !t.isEmpty { return t }
-        let firstLine = content.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let firstLine = Note.stripMarkdown(content).components(separatedBy: "\n").first ?? ""
         return firstLine.isEmpty ? "无标题" : firstLine
     }
 
@@ -62,8 +62,30 @@ struct Note: Identifiable, Codable, Hashable {
             .filter { !$0.value.isEmpty }
             .map { $0.key.isEmpty ? $0.value : "\($0.key): \($0.value)" }
             .joined(separator: "  ")
-        let body = content.replacingOccurrences(of: "\n", with: " ")
+        let body = Note.stripMarkdown(content).replacingOccurrences(of: "\n", with: " ")
         return [fieldText, body].filter { !$0.isEmpty }.joined(separator: "  ")
+    }
+
+    /// 列表摘要用：去掉 Markdown 符号和空行，保留文字
+    static func stripMarkdown(_ text: String) -> String {
+        var lines: [String] = []
+        for raw in text.components(separatedBy: .newlines) {
+            var line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if line.range(of: #"^([-*_])( *\1){2,}$"#, options: .regularExpression) != nil { continue }
+            for (pattern, template) in [
+                (#"^#{1,6}\s+"#, ""),
+                (#"^>+\s?"#, ""),
+                (#"^[-*+]\s+\[[ xX]\]\s+"#, ""),
+                (#"^([-*+]|\d+\.)\s+"#, ""),
+                (#"\[([^\]]+)\]\([^)]+\)"#, "$1"),
+                (#"(\*\*|__|`)"#, ""),
+            ] {
+                line = line.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
+            }
+            if !line.isEmpty { lines.append(line) }
+        }
+        return lines.joined(separator: "\n")
     }
 
     var searchableText: String {

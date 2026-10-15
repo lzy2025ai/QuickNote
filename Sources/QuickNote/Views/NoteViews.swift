@@ -11,6 +11,7 @@ struct NoteListView: View {
     /// 新建笔记后滚动到它
     var revealID: UUID?
     @FocusState private var focused: Bool
+    @State private var pendingDelete: Note?
 
     private var showsProject: Bool {
         if case .project = scope { return false }
@@ -49,7 +50,16 @@ struct NoteListView: View {
                 move(direction, in: pinned + others, proxy: proxy)
             }
             .onDeleteCommand {
-                if case .note(let id) = detail { store.deleteNote(id) }
+                if case .note(let id) = detail { pendingDelete = store.notes.first { $0.id == id } }
+            }
+            .confirmNoteDelete($pendingDelete) { note in
+                // 删除后选中相邻的一则，键盘可以继续操作
+                let ordered = pinned + others
+                if let index = ordered.firstIndex(where: { $0.id == note.id }) {
+                    let neighbor = index + 1 < ordered.count ? ordered[index + 1] : (index > 0 ? ordered[index - 1] : nil)
+                    detail = neighbor.map { .note($0.id) }
+                }
+                store.deleteNote(note.id)
             }
             .onChange(of: revealID) { id in
                 guard let id else { return }
@@ -67,7 +77,7 @@ struct NoteListView: View {
                     detail = .note(note.id)
                     focused = true
                 }
-                .contextMenu { NoteContextMenu(note: note) }
+                .contextMenu { NoteContextMenu(note: note) { pendingDelete = $0 } }
         }
     }
 
@@ -89,6 +99,8 @@ struct NoteListView: View {
 struct NoteContextMenu: View {
     @EnvironmentObject var store: Store
     let note: Note
+    /// 删除交给外层弹确认框
+    let onDelete: (Note) -> Void
 
     var body: some View {
         Button(note.pinned ? "取消置顶" : "置顶") {
@@ -110,7 +122,23 @@ struct NoteContextMenu: View {
         }
         Button("导出为 Markdown…") { MarkdownExporter.exportNote(note, store: store) }
         Divider()
-        Button("删除", role: .destructive) { store.deleteNote(note.id) }
+        Button("删除…", role: .destructive) { onDelete(note) }
+    }
+}
+
+extension View {
+    /// 删除笔记前的确认框
+    func confirmNoteDelete(_ pending: Binding<Note?>, perform: @escaping (Note) -> Void) -> some View {
+        alert(
+            "删除这则笔记？",
+            isPresented: Binding(get: { pending.wrappedValue != nil }, set: { if !$0 { pending.wrappedValue = nil } }),
+            presenting: pending.wrappedValue
+        ) { note in
+            Button("删除", role: .destructive) { perform(note) }
+            Button("取消", role: .cancel) {}
+        } message: { note in
+            Text("「\(note.displayTitle)」删除后无法恢复。")
+        }
     }
 }
 
@@ -215,6 +243,7 @@ struct EmptyStateView: View {
 /// 输入时不会每个按键都刷新整个窗口，也不会打断输入法。
 struct NoteEditorView: View {
     @EnvironmentObject var store: Store
+    @EnvironmentObject var settings: AppSettings
     let noteID: UUID
     let autoFocusTitle: Bool
     let onAutoFocused: () -> Void
@@ -253,7 +282,27 @@ struct NoteEditorView: View {
                     onAutoFocused()
                 }
             }
-            .onDisappear { commitNow() }
+            .onDisappear {
+                if isUntouched {
+                    // 新建后什么都没写就离开：像“备忘录”一样直接丢弃，不留空白笔记
+                    commitWork?.cancel()
+                    commitWork = nil
+                    let id = noteID
+                    DispatchQueue.main.async { store.deleteNote(id) }
+                } else {
+                    commitNow()
+                }
+            }
+    }
+
+    /// 只有自动生成的标题（或没有标题），正文、字段、标签、图片都为空
+    private var isUntouched: Bool {
+        let d = draft
+        guard d.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              d.tags.isEmpty, d.attachments.isEmpty,
+              d.fields.allSatisfy({ $0.value.trimmingCharacters(in: .whitespaces).isEmpty }) else { return false }
+        let title = d.title.trimmingCharacters(in: .whitespaces)
+        return title.isEmpty || title == settings.defaultNoteTitle(projectName: store.project(d.projectID)?.name, date: d.createdAt)
     }
 
     /// 笔记在别处被修改（列表右键、iCloud 同步）且当前没有未提交的输入时，更新草稿
@@ -403,7 +452,7 @@ struct NoteEditorView: View {
                 Button("删除这则笔记…", role: .destructive) { confirmDelete = true }
             }
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, Metrics.editorInset - 8)
         .padding(.top, 6)
     }
 
