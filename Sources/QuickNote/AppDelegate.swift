@@ -41,8 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationWillTerminate(_ notification: Notification) {
-        store.saveData()
-        store.saveClips()
+        store.saveNow()
     }
 
     // MARK: - Window
@@ -62,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.contentViewController = hosting
         window.title = "随手记"
+        window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace]
         window.minSize = NSSize(width: 860, height: 500)
@@ -110,14 +110,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openSettings() {
         if settingsWindow == nil {
-            let hosting = NSHostingController(
-                rootView: SettingsView()
-                    .environmentObject(settings)
-                    .environmentObject(store)
-            )
-            let w = NSWindow(contentViewController: hosting)
-            w.title = "设置"
+            // 系统设置窗口样式：工具栏里的图标标签，切换时窗口自动调整高度
+            let tabs = NSTabViewController()
+            tabs.tabStyle = .toolbar
+            for page in SettingsPage.allCases {
+                let hosting = NSHostingController(
+                    rootView: page.view
+                        .frame(width: page.size.width, height: page.size.height)
+                        .environmentObject(settings)
+                        .environmentObject(store)
+                )
+                hosting.preferredContentSize = page.size
+                let item = NSTabViewItem(viewController: hosting)
+                item.label = page.title
+                item.image = NSImage(systemSymbolName: page.symbol, accessibilityDescription: page.title)
+                tabs.addTabViewItem(item)
+            }
+            let w = NSWindow(contentViewController: tabs)
             w.styleMask = [.titled, .closable]
+            w.toolbarStyle = .preference
             w.isReleasedWhenClosed = false
             settingsWindow = w
             w.center()
@@ -138,7 +149,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func focusSearch() {
         showWindow()
-        NotificationCenter.default.post(name: .qnFocusSearch, object: nil)
+        DispatchQueue.main.async {
+            if let field = self.findSearchField() {
+                self.window.makeFirstResponder(field)
+            }
+        }
+    }
+
+    private func findSearchField() -> NSSearchField? {
+        for item in window.toolbar?.items ?? [] {
+            if let search = item as? NSSearchToolbarItem { return search.searchField }
+            if let field = item.view as? NSSearchField { return field }
+        }
+        // 兜底：在标题栏的视图层级里找
+        func find(in view: NSView) -> NSSearchField? {
+            if let field = view as? NSSearchField { return field }
+            for sub in view.subviews {
+                if let found = find(in: sub) { return found }
+            }
+            return nil
+        }
+        return window.contentView?.superview.flatMap(find)
     }
 
     @objc func toggleSidebar() {

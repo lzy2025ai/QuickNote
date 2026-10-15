@@ -2,21 +2,51 @@ import AppKit
 import SwiftUI
 import ServiceManagement
 
-struct SettingsView: View {
-    var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label("通用", systemImage: "gearshape") }
-            HotKeySettings().tabItem { Label("快捷键", systemImage: "keyboard") }
-            ClipboardSettings().tabItem { Label("剪贴板", systemImage: "doc.on.clipboard") }
-            SyncSettings().tabItem { Label("同步与数据", systemImage: "icloud") }
+/// 设置窗口的各个页面，由 AppDelegate 放进系统样式的 NSTabViewController（工具栏图标标签）
+enum SettingsPage: CaseIterable {
+    case general, hotKeys, clipboard, sync
+
+    var title: String {
+        switch self {
+        case .general: return "通用"
+        case .hotKeys: return "快捷键"
+        case .clipboard: return "剪贴板"
+        case .sync: return "同步与数据"
         }
-        .frame(width: 560, height: 480)
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: return "gearshape"
+        case .hotKeys: return "keyboard"
+        case .clipboard: return "list.clipboard"
+        case .sync: return "icloud"
+        }
+    }
+
+    var size: CGSize {
+        switch self {
+        case .general: return CGSize(width: 560, height: 400)
+        case .hotKeys: return CGSize(width: 560, height: 300)
+        case .clipboard: return CGSize(width: 560, height: 360)
+        case .sync: return CGSize(width: 560, height: 440)
+        }
+    }
+
+    @ViewBuilder
+    var view: some View {
+        switch self {
+        case .general: GeneralSettings()
+        case .hotKeys: HotKeySettings()
+        case .clipboard: ClipboardSettings()
+        case .sync: SyncSettings()
+        }
     }
 }
 
 // MARK: - 通用
 
-private struct GeneralSettings: View {
+struct GeneralSettings: View {
     @EnvironmentObject var settings: AppSettings
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
@@ -66,7 +96,7 @@ private struct GeneralSettings: View {
 
 // MARK: - 快捷键
 
-private struct HotKeySettings: View {
+struct HotKeySettings: View {
     var body: some View {
         Form {
             Section {
@@ -191,7 +221,7 @@ struct HotKeyRecorder: View {
 
 // MARK: - 剪贴板
 
-private struct ClipboardSettings: View {
+struct ClipboardSettings: View {
     @EnvironmentObject var settings: AppSettings
 
     var body: some View {
@@ -220,7 +250,7 @@ private struct ClipboardSettings: View {
 
 // MARK: - 同步与数据
 
-private struct SyncSettings: View {
+struct SyncSettings: View {
     @EnvironmentObject var settings: AppSettings
     @EnvironmentObject var store: Store
     @State private var error: String?

@@ -60,6 +60,8 @@ final class Store: ObservableObject {
     private var lastModDate: Date?
     private var cancellables = Set<AnyCancellable>()
     private var syncTimer: Timer?
+    /// 编码和写文件放在后台串行队列，避免卡住输入
+    private let ioQueue = DispatchQueue(label: "QuickNote.io", qos: .utility)
 
     var dataFile: URL { dataDirectory.appendingPathComponent("data.json") }
     var attachmentsDirectory: URL { dataDirectory.appendingPathComponent("Attachments", isDirectory: true) }
@@ -117,7 +119,7 @@ final class Store: ObservableObject {
             notes = d.notes
             deleted = d.deleted
             lastFileData = data
-            lastModDate = modificationDate(dataFile)
+            lastModDate = Store.modificationDate(dataFile)
         } else {
             // 解析失败时备份原文件，避免覆盖掉用户数据
             let backup = dataDirectory.appendingPathComponent("data-corrupted-\(Int(Date().timeIntervalSince1970)).json")
@@ -129,19 +131,43 @@ final class Store: ObservableObject {
         saveData(checkRemote: true)
     }
 
+    /// 退出前同步写入
+    func saveNow() {
+        guard !isAwaitingDownload, let data = Store.encode(snapshot), data != lastFileData else { return }
+        try? Store.coordinatedWrite(data, to: dataFile)
+        lastFileData = data
+        let clipData = Store.encode(ClipData(clips: clips))
+        try? clipData?.write(to: Paths.clipsFile, options: .atomic)
+    }
+
     private func saveData(checkRemote: Bool) {
         // iCloud 上的文件还没下载到本机时不能写，否则会覆盖云端数据
         guard !isAwaitingDownload else { return }
         if checkRemote { checkExternalChanges(thenSave: false) }
-        guard let data = encode(snapshot), data != lastFileData else { return }
-        do {
-            try coordinatedWrite(data, to: dataFile)
-            lastFileData = data
-            lastModDate = modificationDate(dataFile)
-            if isICloud { syncStatus = "已同步 · " + Date().formatted(date: .omitted, time: .shortened) }
-        } catch {
-            syncStatus = "保存失败：\(error.localizedDescription)"
-            NSLog("QuickNote: save failed: \(error)")
+        let snap = snapshot
+        let url = dataFile
+        let iCloud = isICloud
+        ioQueue.async { [weak self] in
+            guard let data = Store.encode(snap) else { return }
+            DispatchQueue.main.async {
+                guard let self, data != self.lastFileData, url == self.dataFile else { return }
+                self.lastFileData = data
+                self.ioQueue.async {
+                    do {
+                        try Store.coordinatedWrite(data, to: url)
+                        let mod = Store.modificationDate(url)
+                        DispatchQueue.main.async {
+                            self.lastModDate = mod
+                            if iCloud { self.syncStatus = "已同步 · " + Date().formatted(date: .omitted, time: .shortened) }
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.lastFileData = nil
+                            self.syncStatus = "保存失败：\(error.localizedDescription)"
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -150,10 +176,10 @@ final class Store: ObservableObject {
             requestDownloadIfNeeded()
             return
         }
-        let mod = modificationDate(dataFile)
+        let mod = Store.modificationDate(dataFile)
         guard mod != lastModDate else { return }
         lastModDate = mod
-        guard let data = coordinatedRead(dataFile), data != lastFileData, let remote = decode(data) else { return }
+        guard let data = Store.coordinatedRead(dataFile), data != lastFileData, let remote = decode(data) else { return }
         lastFileData = data
         apply(Store.merge(local: snapshot, remote: remote))
         if isICloud { syncStatus = "已同步 · " + Date().formatted(date: .omitted, time: .shortened) }
@@ -221,7 +247,7 @@ final class Store: ObservableObject {
         if let data = readDataFile(), let remote = decode(data) {
             merged = Store.merge(local: local, remote: remote)
             lastFileData = data
-            lastModDate = modificationDate(dataFile)
+            lastModDate = Store.modificationDate(dataFile)
         }
         apply(merged)
         saveData(checkRemote: false)
@@ -248,14 +274,14 @@ final class Store: ObservableObject {
             requestDownloadIfNeeded()
             return nil
         }
-        return coordinatedRead(dataFile)
+        return Store.coordinatedRead(dataFile)
     }
 
-    private func modificationDate(_ url: URL) -> Date? {
+    private static func modificationDate(_ url: URL) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
-    private func coordinatedRead(_ url: URL) -> Data? {
+    private static func coordinatedRead(_ url: URL) -> Data? {
         var result: Data?
         var error: NSError?
         NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &error) { u in
@@ -264,7 +290,7 @@ final class Store: ObservableObject {
         return result
     }
 
-    private func coordinatedWrite(_ data: Data, to url: URL) throws {
+    private static func coordinatedWrite(_ data: Data, to url: URL) throws {
         var coordError: NSError?
         var writeError: Error?
         NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordError) { u in
@@ -273,7 +299,7 @@ final class Store: ObservableObject {
         if let e = coordError ?? writeError { throw e }
     }
 
-    private func encode<T: Encodable>(_ value: T) -> Data? {
+    private static func encode<T: Encodable>(_ value: T) -> Data? {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -306,8 +332,11 @@ final class Store: ObservableObject {
     }
 
     func saveClips() {
-        guard let data = encode(ClipData(clips: clips)) else { return }
-        try? data.write(to: Paths.clipsFile, options: .atomic)
+        let snapshot = ClipData(clips: clips)
+        ioQueue.async {
+            guard let data = Store.encode(snapshot) else { return }
+            try? data.write(to: Paths.clipsFile, options: .atomic)
+        }
     }
 
     // MARK: - Projects
@@ -347,7 +376,13 @@ final class Store: ObservableObject {
     }
 
     func noteCount(_ scope: SidebarItem) -> Int {
-        scope == .clipboard ? clips.count : notes(for: scope).count
+        switch scope {
+        case .all: return notes.count
+        case .inbox: return notes.lazy.filter { $0.projectID == nil }.count
+        case .clipboard: return clips.count
+        case .project(let id): return notes.lazy.filter { $0.projectID == id }.count
+        case .tag(let tag): return notes.lazy.filter { $0.tags.contains(tag) }.count
+        }
     }
 
     // MARK: - Notes
@@ -386,18 +421,14 @@ final class Store: ObservableObject {
         notes[i].updatedAt = Date()
     }
 
-    func binding(for id: UUID) -> Binding<Note>? {
-        guard let current = notes.first(where: { $0.id == id }) else { return nil }
-        return Binding(
-            get: { [weak self] in self?.notes.first { $0.id == id } ?? current },
-            set: { [weak self] newValue in
-                guard let self, let i = self.notes.firstIndex(where: { $0.id == id }) else { return }
-                guard self.notes[i] != newValue else { return }
-                var n = newValue
-                n.updatedAt = Date()
-                self.notes[i] = n
-            }
-        )
+    /// 编辑器提交整条笔记；内容没变时不触发更新
+    func updateNote(_ note: Note) {
+        guard let i = notes.firstIndex(where: { $0.id == note.id }) else { return }
+        var n = note
+        n.updatedAt = notes[i].updatedAt
+        guard notes[i] != n else { return }
+        n.updatedAt = Date()
+        notes[i] = n
     }
 
     // MARK: - Attachments
@@ -406,31 +437,33 @@ final class Store: ObservableObject {
         attachmentsDirectory.appendingPathComponent(name)
     }
 
-    func addAttachment(fileURL: URL, to noteID: UUID) {
+    /// 把图片复制进附件目录，返回文件名
+    func importAttachment(fileURL: URL) -> String? {
         let ext = fileURL.pathExtension.isEmpty ? "png" : fileURL.pathExtension.lowercased()
         let name = UUID().uuidString + "." + ext
         do {
             try FileManager.default.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
             try FileManager.default.copyItem(at: fileURL, to: attachmentURL(name))
-            mutateNote(noteID) { $0.attachments.append(name) }
+            return name
         } catch {
-            NSLog("QuickNote: add attachment failed: \(error)")
+            NSLog("QuickNote: import attachment failed: \(error)")
+            return nil
         }
     }
 
-    func addAttachment(pngData: Data, to noteID: UUID) {
+    func importAttachment(pngData: Data) -> String? {
         let name = UUID().uuidString + ".png"
         do {
             try FileManager.default.createDirectory(at: attachmentsDirectory, withIntermediateDirectories: true)
             try pngData.write(to: attachmentURL(name))
-            mutateNote(noteID) { $0.attachments.append(name) }
+            return name
         } catch {
-            NSLog("QuickNote: add attachment failed: \(error)")
+            NSLog("QuickNote: import attachment failed: \(error)")
+            return nil
         }
     }
 
-    func removeAttachment(_ name: String, from noteID: UUID) {
-        mutateNote(noteID) { $0.attachments.removeAll { $0 == name } }
+    func deleteAttachmentFile(_ name: String) {
         try? FileManager.default.removeItem(at: attachmentURL(name))
     }
 

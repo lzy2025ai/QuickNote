@@ -5,13 +5,12 @@ struct ContentView: View {
     @EnvironmentObject var settings: AppSettings
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    /// 刚新建的笔记：编辑器打开时自动聚焦并选中标题，直接输入即可替换默认标题
-    @State private var justCreatedID: UUID?
     @State private var selection: SidebarItem? = .all
     @State private var detail: Detail?
     @State private var searchText = ""
     @State private var showNewProject = false
-    @FocusState private var searchFocused: Bool
+    /// 刚新建的笔记：列表滚动到它，编辑器自动聚焦标题（只生效一次）
+    @State private var justCreatedID: UUID?
 
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespaces).isEmpty
@@ -31,21 +30,17 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(
-                selection: sidebarSelection,
-                searchText: $searchText,
-                searchFocused: $searchFocused,
-                showNewProject: $showNewProject
-            )
-            .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 300)
-            .modifier(HideSidebarToggle())
+            SidebarView(selection: sidebarSelection, showNewProject: $showNewProject)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 320)
         } content: {
             contentColumn
-                .navigationSplitViewColumnWidth(min: 260, ideal: 310, max: 450)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 480)
         } detail: {
             detailColumn
         }
-        .frame(minWidth: 860, minHeight: 500)
+        // 系统搜索框，放在工具栏右侧（与“备忘录”“邮件”一致），⌘F 聚焦
+        .searchable(text: $searchText, placement: .toolbar, prompt: "搜索笔记、剪贴板、#标签")
+        .frame(minWidth: 900, minHeight: 540)
         .sheet(isPresented: $showNewProject) {
             ProjectEditSheet(project: nil) { created in
                 sidebarSelection.wrappedValue = .project(created.id)
@@ -54,7 +49,6 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .qnNewNote)) { _ in createNote() }
         .onReceive(NotificationCenter.default.publisher(for: .qnNewProject)) { _ in showNewProject = true }
-        .onReceive(NotificationCenter.default.publisher(for: .qnFocusSearch)) { _ in searchFocused = true }
         .onReceive(NotificationCenter.default.publisher(for: .qnToggleSidebar)) { _ in
             withAnimation { columnVisibility = columnVisibility == .all ? .doubleColumn : .all }
         }
@@ -71,7 +65,7 @@ struct ContentView: View {
         } else if selection == .clipboard {
             ClipListView(detail: $detail)
         } else {
-            NoteListView(scope: selection ?? .all, detail: $detail, onCreate: createNote)
+            NoteListView(scope: selection ?? .all, detail: $detail, revealID: justCreatedID, onCreate: createNote)
         }
     }
 
@@ -79,20 +73,12 @@ struct ContentView: View {
     private var detailColumn: some View {
         switch detail {
         case .note(let id)? where store.notes.contains(where: { $0.id == id }):
-            NoteEditorView(noteID: id, autoFocusTitle: id == justCreatedID).id(id)
+            NoteEditorView(noteID: id, autoFocusTitle: id == justCreatedID, onAutoFocused: { justCreatedID = nil })
+                .id(id)
         case .clip(let id)? where store.clips.contains(where: { $0.id == id }):
             ClipDetailView(clipID: id, onSavedAsNote: openNote)
         default:
-            VStack(spacing: 10) {
-                Image(systemName: "square.and.pencil")
-                    .font(.system(size: 40, weight: .light))
-                    .foregroundStyle(.tertiary)
-                Text("选择或新建一条笔记").foregroundStyle(.secondary)
-                Text("⌘N 新建笔记 · ⌘F 搜索 · ⇧⌘N 新建项目 · ⇧⌘Y 剪贴板")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            EmptyStateView(title: "未选择笔记", systemImage: "square.and.pencil", description: "⌘N 新建笔记 · ⌘F 搜索 · ⇧⌘N 新建项目")
         }
     }
 
@@ -117,16 +103,5 @@ struct ContentView: View {
         searchText = ""
         selection = note.projectID.map { .project($0) } ?? .inbox
         detail = .note(note.id)
-    }
-}
-
-/// 去掉系统自动加在标题栏上的“收起侧栏”按钮（macOS 14+；改用菜单 显示 › 显示 / 隐藏侧栏 ⌃⌘S）
-private struct HideSidebarToggle: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 14.0, *) {
-            content.toolbar(removing: .sidebarToggle)
-        } else {
-            content
-        }
     }
 }

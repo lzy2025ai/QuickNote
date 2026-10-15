@@ -21,56 +21,21 @@ struct ClipListView: View {
             case .image: return c.isImage
             }
         }
-        clipList(clips)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            VStack(spacing: 0) {
-                ColumnHeader(title: "剪贴板历史", count: clips.count) {
-                    Toggle("记录", isOn: $settings.clipboardEnabled)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .help("暂停 / 恢复记录剪贴板")
-                    Button {
-                        confirmClear = true
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("清空历史（保留置顶）")
-                }
-                Picker("", selection: $filter) {
-                    ForEach(ClipFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.bar)
-                .overlay(alignment: .bottom) { Divider() }
-            }
-        }
-        .alert("清空剪贴板历史？", isPresented: $confirmClear) {
-            Button("清空", role: .destructive) { store.clearClips(keepPinned: true) }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("置顶的条目会保留。")
-        }
-    }
-
-    private func clipList(_ clips: [ClipItem]) -> some View {
         List(selection: $detail) {
             ForEach(clips) { clip in
                 ClipRow(clip: clip).tag(Detail.clip(clip.id))
             }
         }
+        .listStyle(.inset)
         .contextMenu(forSelectionType: Detail.self) { items in
             if let clip = clip(from: items) {
-                Button("复制") { copy(clip) }
+                Button("拷贝") { copy(clip) }
                 Button(clip.pinned ? "取消置顶" : "置顶") { store.toggleClipPin(clip.id) }
                 Divider()
                 Button("删除", role: .destructive) { store.deleteClip(clip.id) }
             }
         } primaryAction: { items in
-            // 双击 / 回车：复制
+            // 双击 / 回车：拷贝
             if let clip = clip(from: items) { copy(clip) }
         }
         .onDeleteCommand {
@@ -78,9 +43,39 @@ struct ClipListView: View {
         }
         .overlay {
             if clips.isEmpty {
-                Text(settings.clipboardEnabled ? "复制点什么，就会自动出现在这里" : "剪贴板记录已暂停")
-                    .foregroundStyle(.secondary)
+                if settings.clipboardEnabled {
+                    EmptyStateView(title: "暂无记录", systemImage: "list.clipboard", description: "复制的文字和图片会自动出现在这里")
+                } else {
+                    EmptyStateView(title: "已暂停记录", systemImage: "pause.circle", description: "在右上角菜单中恢复记录")
+                }
             }
+        }
+        .navigationTitle("剪贴板历史")
+        .navigationSubtitle(settings.clipboardEnabled ? "\(clips.count) 条" : "已暂停记录")
+        .toolbar {
+            ToolbarItem {
+                Picker("类型", selection: $filter) {
+                    ForEach(ClipFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .help("筛选类型")
+            }
+            ToolbarItem {
+                Menu {
+                    Toggle("记录剪贴板", isOn: $settings.clipboardEnabled)
+                    Divider()
+                    Button("清空历史…") { confirmClear = true }
+                } label: {
+                    Label("更多", systemImage: "ellipsis.circle")
+                }
+                .help("更多")
+            }
+        }
+        .alert("清空剪贴板历史？", isPresented: $confirmClear) {
+            Button("清空", role: .destructive) { store.clearClips(keepPinned: true) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("置顶的条目会保留。")
         }
     }
 
@@ -104,42 +99,43 @@ struct ClipRow: View {
 
     var body: some View {
         let terms = SearchText.terms(query)
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 10) {
             if clip.isImage, let url = store.clipImageURL(clip) {
                 ThumbnailView(url: url, maxPixel: 200)
-                    .frame(width: 64, height: 48)
+                    .frame(width: 56, height: 42)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.04)))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.08)))
             }
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .top, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
                     if clip.pinned {
-                        Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.orange)
+                        Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.orange)
                     }
-                    if clip.isImage {
-                        let ocr = terms.isEmpty ? clip.text.replacingOccurrences(of: "\n", with: " ") : SearchText.snippet(clip.text, terms: terms)
-                        Text(ocr.isEmpty ? AttributedString("图片 \(clip.imageWidth ?? 0)×\(clip.imageHeight ?? 0)") : SearchText.highlight(ocr, terms: terms))
-                            .font(.system(size: 12))
-                            .foregroundStyle(ocr.isEmpty ? Color.secondary : Color.primary)
-                            .lineLimit(2)
-                    } else {
-                        let text = terms.isEmpty
-                            ? clip.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                            : SearchText.snippet(clip.text, terms: terms)
-                        Text(SearchText.highlight(text, terms: terms))
-                            .font(.system(size: 12))
-                            .lineLimit(3)
-                    }
+                    Text(primaryText(terms))
+                        .font(.system(size: 13))
+                        .foregroundStyle(clip.isImage && clip.text.isEmpty ? Color.secondary : Color.primary)
+                        .lineLimit(2)
                 }
-                HStack(spacing: 6) {
-                    Text(clip.createdAt.formatted(date: .abbreviated, time: .shortened))
+                HStack(spacing: 4) {
+                    Text(RelativeDate.short(clip.createdAt))
                     if let app = clip.sourceApp { Text("· \(app)") }
-                    if !clip.isImage { Text("· \(clip.text.count) 字") }
                 }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 3)
+    }
+
+    private func primaryText(_ terms: [String]) -> AttributedString {
+        if clip.isImage && clip.text.isEmpty {
+            return AttributedString("图片 \(clip.imageWidth ?? 0) × \(clip.imageHeight ?? 0)")
+        }
+        let text = terms.isEmpty
+            ? clip.text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+            : SearchText.snippet(clip.text, terms: terms)
+        return SearchText.highlight(text, terms: terms)
     }
 }
 
@@ -151,24 +147,23 @@ struct ClipDetailView: View {
 
     var body: some View {
         if let clip = store.clips.first(where: { $0.id == clipID }) {
-            VStack(alignment: .leading, spacing: 0) {
-                toolbar(clip)
-                Divider()
+            VStack(spacing: 0) {
                 if clip.isImage, let url = store.clipImageURL(clip) {
                     imageBody(clip, url: url)
                 } else {
                     ScrollView {
                         Text(clip.text)
-                            .font(.system(size: 13))
+                            .font(.system(size: 14))
+                            .lineSpacing(3)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(16)
+                            .padding(24)
                     }
                 }
                 Divider()
-                HStack {
-                    Text(clip.createdAt.formatted(date: .complete, time: .standard))
-                    if let app = clip.sourceApp { Text("来自 \(app)") }
+                HStack(spacing: 6) {
+                    Text(clip.createdAt.formatted(date: .long, time: .standard))
+                    if let app = clip.sourceApp { Text("· 来自 \(app)") }
                     Spacer()
                     if clip.isImage {
                         Text("\(clip.imageWidth ?? 0) × \(clip.imageHeight ?? 0)")
@@ -176,31 +171,35 @@ struct ClipDetailView: View {
                         Text("\(clip.text.count) 字")
                     }
                 }
-                .font(.caption)
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 6)
+                .padding(.vertical, 7)
             }
+            .background(Color(nsColor: .textBackgroundColor))
+            .toolbar { toolbar(clip) }
         }
     }
 
-    private func toolbar(_ clip: ClipItem) -> some View {
-        HStack(spacing: 12) {
+    @ToolbarContentBuilder
+    private func toolbar(_ clip: ClipItem) -> some ToolbarContent {
+        ToolbarItemGroup {
             Button {
                 store.copyClip(clip)
                 copied = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
             } label: {
-                Label(copied ? "已复制" : (clip.isImage ? "复制图片" : "复制"),
-                      systemImage: copied ? "checkmark" : "doc.on.doc")
+                Label(copied ? "已拷贝" : "拷贝", systemImage: copied ? "checkmark" : "doc.on.doc")
             }
+            .help(clip.isImage ? "拷贝图片" : "拷贝")
 
             if clip.isImage && !clip.text.isEmpty {
                 Button {
                     Pasteboard.copy(clip.text)
                 } label: {
-                    Label("复制识别的文字", systemImage: "text.viewfinder")
+                    Label("拷贝识别的文字", systemImage: "text.viewfinder")
                 }
+                .help("拷贝图片中识别出的文字")
             }
 
             Menu {
@@ -210,56 +209,56 @@ struct ClipDetailView: View {
                     Button(p.name) { onSavedAsNote(store.saveClipAsNote(clip, projectID: p.id)) }
                 }
             } label: {
-                Label("存为笔记", systemImage: "square.and.arrow.down")
+                Label("存为笔记", systemImage: "note.text.badge.plus")
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            .help("存为笔记")
 
             if clip.isImage, let url = store.clipImageURL(clip) {
                 Button {
                     saveImage(url)
                 } label: {
-                    Label("另存为…", systemImage: "square.and.arrow.up")
+                    Label("存储为…", systemImage: "square.and.arrow.down")
                 }
+                .help("把图片存储为文件")
             }
-
-            Spacer()
 
             Button {
                 store.toggleClipPin(clip.id)
             } label: {
-                Image(systemName: clip.pinned ? "pin.fill" : "pin")
+                Label(clip.pinned ? "取消置顶" : "置顶", systemImage: clip.pinned ? "pin.slash" : "pin")
             }
             .help(clip.pinned ? "取消置顶" : "置顶（不会被自动清理）")
 
             Button {
                 store.deleteClip(clip.id)
             } label: {
-                Image(systemName: "trash")
+                Label("删除", systemImage: "trash")
             }
             .help("删除")
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 16)
-        .frame(height: 38)
     }
 
     private func imageBody(_ clip: ClipItem, url: URL) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
                 ThumbnailView(url: url, maxPixel: 2400)
                     .frame(maxWidth: .infinity, maxHeight: 520)
+                    .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
                     .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
                     .help("双击用“预览”打开")
                 if !clip.text.isEmpty {
-                    Text("识别到的文字").font(.caption).foregroundStyle(.secondary)
-                    Text(clip.text)
-                        .font(.system(size: 12))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("识别到的文字")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text(clip.text)
+                            .font(.system(size: 13))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
-            .padding(16)
+            .padding(24)
         }
     }
 
@@ -283,7 +282,7 @@ struct SearchResultsView: View {
         let clips = store.searchClips(query)
         List(selection: $detail) {
             if !notes.isEmpty {
-                Section("笔记 · \(notes.count)") {
+                Section("笔记") {
                     ForEach(notes) { n in
                         NoteRow(note: n, showProject: true, query: query)
                             .tag(Detail.note(n.id))
@@ -292,20 +291,20 @@ struct SearchResultsView: View {
                 }
             }
             if !clips.isEmpty {
-                Section("剪贴板 · \(clips.count)") {
+                Section("剪贴板") {
                     ForEach(clips) { c in
                         ClipRow(clip: c, query: query).tag(Detail.clip(c.id))
                     }
                 }
             }
         }
+        .listStyle(.inset)
         .overlay {
             if notes.isEmpty && clips.isEmpty {
-                Text("没有找到“\(query)”").foregroundStyle(.secondary)
+                EmptyStateView(title: "没有结果", systemImage: "magnifyingglass", description: "没有找到“\(query)”")
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            ColumnHeader(title: "搜索结果", count: notes.count + clips.count) { EmptyView() }
-        }
+        .navigationTitle("搜索结果")
+        .navigationSubtitle("\(notes.count + clips.count) 条")
     }
 }

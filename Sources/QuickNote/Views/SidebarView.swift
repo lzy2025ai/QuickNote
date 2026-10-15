@@ -3,8 +3,6 @@ import SwiftUI
 struct SidebarView: View {
     @EnvironmentObject var store: Store
     @Binding var selection: SidebarItem?
-    @Binding var searchText: String
-    var searchFocused: FocusState<Bool>.Binding
     @Binding var showNewProject: Bool
 
     @State private var editingProject: Project?
@@ -13,19 +11,15 @@ struct SidebarView: View {
     @State private var renameText = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            SearchField(text: $searchText, focused: searchFocused)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+        List(selection: $selection) {
+            Section("资料库") {
+                row("全部笔记", icon: "note.text", item: .all)
+                row("收件箱", icon: "tray", item: .inbox)
+                row("剪贴板历史", icon: "list.clipboard", item: .clipboard)
+            }
 
-            List(selection: $selection) {
-                Section("资料库") {
-                    row("全部笔记", icon: "tray.full", item: .all)
-                    row("收件箱", icon: "tray", item: .inbox)
-                    row("剪贴板历史", icon: "doc.on.clipboard", item: .clipboard)
-                }
-
-                Section {
+            if !store.projects.isEmpty {
+                Section("项目") {
                     ForEach(store.projects) { p in
                         Label { Text(p.name) } icon: { ProjectIcon(project: p) }
                             .badge(store.noteCount(.project(p.id)))
@@ -41,66 +35,56 @@ struct SidebarView: View {
                             }
                     }
                     .onMove { store.moveProjects(from: $0, to: $1) }
-
-                    if store.projects.isEmpty {
-                        Button {
-                            showNewProject = true
-                        } label: {
-                            Label("新建一个项目", systemImage: "plus")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                } header: {
-                    HStack {
-                        Text("项目")
-                        Spacer()
-                        Button {
-                            showNewProject = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("新建项目 (⇧⌘N)")
-                    }
                 }
+            }
 
-                let tags = store.allTags
-                if !tags.isEmpty {
-                    Section("标签") {
-                        ForEach(tags, id: \.name) { t in
-                            Label(t.name, systemImage: "number")
-                                .badge(t.count)
-                                .tag(SidebarItem.tag(t.name))
-                                .contextMenu {
-                                    Button("重命名…") {
-                                        renameText = t.name
-                                        renamingTag = t.name
-                                    }
-                                    Button("导出为 Markdown…") {
-                                        MarkdownExporter.exportNotes(store.notes(for: .tag(t.name)), title: "#" + t.name, store: store)
-                                    }
-                                    Divider()
-                                    Button("删除标签", role: .destructive) {
-                                        if selection == .tag(t.name) { selection = .all }
-                                        store.deleteTag(t.name)
-                                    }
+            let tags = store.allTags
+            if !tags.isEmpty {
+                Section("标签") {
+                    ForEach(tags, id: \.name) { t in
+                        Label(t.name, systemImage: "number")
+                            .badge(t.count)
+                            .tag(SidebarItem.tag(t.name))
+                            .contextMenu {
+                                Button("重命名…") {
+                                    renameText = t.name
+                                    renamingTag = t.name
                                 }
-                        }
+                                Button("导出为 Markdown…") {
+                                    MarkdownExporter.exportNotes(store.notes(for: .tag(t.name)), title: "#" + t.name, store: store)
+                                }
+                                Divider()
+                                Button("删除标签", role: .destructive) {
+                                    if selection == .tag(t.name) { selection = .all }
+                                    store.deleteTag(t.name)
+                                }
+                            }
                     }
                 }
             }
-            .listStyle(.sidebar)
-
-            if !store.syncStatus.isEmpty {
-                Divider()
-                Label(store.syncStatus, systemImage: store.isICloud ? "icloud" : "externaldrive")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+        }
+        .listStyle(.sidebar)
+        // 与“备忘录”的“新建文件夹”一样放在侧栏底部
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                if !store.syncStatus.isEmpty {
+                    Label(store.syncStatus, systemImage: store.isICloud ? "icloud" : "externaldrive")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Button {
+                    showNewProject = true
+                } label: {
+                    Label("新建项目", systemImage: "plus.circle")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("新建项目（⇧⌘N）")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
         .sheet(item: $editingProject) { p in
             ProjectEditSheet(project: p).environmentObject(store)
@@ -138,32 +122,6 @@ struct SidebarView: View {
         Label(title, systemImage: icon)
             .badge(store.noteCount(item))
             .tag(item)
-    }
-}
-
-struct SearchField: View {
-    @Binding var text: String
-    var focused: FocusState<Bool>.Binding
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("搜索笔记和剪贴板，#标签", text: $text)
-                .textFieldStyle(.plain)
-                .focused(focused)
-                .onExitCommand { text = "" }
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 7).fill(.quaternary.opacity(0.6)))
     }
 }
 
