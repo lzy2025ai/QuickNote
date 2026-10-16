@@ -22,6 +22,7 @@ struct NoteTextView: NSViewRepresentable {
         layoutManager.addTextContainer(container)
 
         let textView = MarkdownTextView(frame: .zero, textContainer: container)
+        textView.bodyFontSize = fontSize
         textView.minSize = .zero
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
@@ -112,6 +113,8 @@ struct NoteTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            // 组字时不重新渲染，但自绘的分隔线、方框要跟着文字重画
+            textView.needsDisplay = true
             restyle()
             updatePlaceholder()
             if let start = pendingSlash {
@@ -129,7 +132,8 @@ struct NoteTextView: NSViewRepresentable {
 
         func restyle() {
             guard let textView, !textView.hasMarkedText(), let storage = textView.textStorage else { return }
-            textView.ruleRanges = markdown.apply(to: storage)
+            markdown.apply(to: storage)
+            textView.needsDisplay = true
             textView.typingAttributes = markdown.baseAttributes
             // 改样式会打断光标闪烁，换行后光标会“消失”一下；这里重新显示光标
             textView.updateInsertionPointStateAndRestartTimer(true)
@@ -268,26 +272,106 @@ struct NoteTextView: NSViewRepresentable {
     }
 }
 
-/// 自己绘制 Markdown 分隔线；点击 [ ] 勾选待办
+extension NSAttributedString.Key {
+    /// 分隔线（值无意义）
+    static let qnRule = NSAttributedString.Key("qn.rule")
+    /// 待办方框 “- [ ]”，值为是否已勾选
+    static let qnTask = NSAttributedString.Key("qn.task")
+    /// 无序列表的 “-”
+    static let qnBullet = NSAttributedString.Key("qn.bullet")
+}
+
+/// 把 Markdown 符号画成真正的样式：分隔线、待办方框、列表圆点；点击方框勾选待办。
+/// 位置信息挂在文字属性上，输入法组字时随文字一起移动，不会错位。
 final class MarkdownTextView: NSTextView {
-    var ruleRanges: [NSRange] = [] {
-        didSet { if ruleRanges != oldValue { needsDisplay = true } }
-    }
+    var bodyFontSize: CGFloat = 15
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
-        guard let layoutManager, let textContainer else { return }
-        let length = (string as NSString).length
-        let origin = textContainerOrigin
-        let padding = textContainer.lineFragmentPadding
-        Palette.faintNS.setFill()
-        for range in ruleRanges where NSMaxRange(range) <= length {
-            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            guard glyphs.length > 0 else { continue }
-            let line = layoutManager.lineFragmentUsedRect(forGlyphAt: glyphs.location, effectiveRange: nil)
-            let y = (origin.y + line.midY).rounded(.down) + 0.5
-            NSRect(x: origin.x + padding, y: y, width: textContainer.size.width - padding * 2, height: 1).fill()
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let full = NSRange(location: 0, length: storage.length)
+        storage.enumerateAttribute(.qnRule, in: full) { value, range, _ in
+            if value != nil { drawRule(range) }
         }
+        storage.enumerateAttribute(.qnTask, in: full) { value, range, _ in
+            if let checked = value as? Bool { drawTask(range, checked: checked) }
+        }
+        storage.enumerateAttribute(.qnBullet, in: full) { value, range, _ in
+            if value != nil { drawBullet(range) }
+        }
+    }
+
+    /// 字符所在位置：x、文字视觉中线（视图坐标）
+    private func anchor(at charIndex: Int) -> (x: CGFloat, midY: CGFloat)? {
+        guard let layoutManager else { return nil }
+        let glyph = layoutManager.glyphIndexForCharacter(at: charIndex)
+        guard glyph < layoutManager.numberOfGlyphs else { return nil }
+        let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let location = layoutManager.location(forGlyphAt: glyph)
+        let origin = textContainerOrigin
+        let baseline = origin.y + fragment.minY + location.y
+        return (origin.x + fragment.minX + location.x, baseline - bodyFontSize * 0.36)
+    }
+
+    /// 分隔线：两端渐隐的细线，中间一枚朱砂小菱形
+    private func drawRule(_ range: NSRange) {
+        guard let textContainer, let point = anchor(at: range.location) else { return }
+        let padding = textContainer.lineFragmentPadding
+        let left = textContainerOrigin.x + padding
+        let width = textContainer.size.width - padding * 2
+        let centerX = left + width / 2
+        let y = point.midY.rounded() + 0.5
+        let half = min(width * 0.24, 150)
+        let gap: CGFloat = 12
+        let ink = Palette.faintNS
+        let fade = NSGradient(colors: [ink.withAlphaComponent(0), ink])
+        fade?.draw(in: NSRect(x: centerX - half, y: y - 0.5, width: half - gap, height: 1), angle: 0)
+        fade?.draw(in: NSRect(x: centerX + gap, y: y - 0.5, width: half - gap, height: 1), angle: 180)
+
+        let d: CGFloat = 3.2
+        let diamond = NSBezierPath()
+        diamond.move(to: NSPoint(x: centerX, y: y - d))
+        diamond.line(to: NSPoint(x: centerX + d, y: y))
+        diamond.line(to: NSPoint(x: centerX, y: y + d))
+        diamond.line(to: NSPoint(x: centerX - d, y: y))
+        diamond.close()
+        Palette.sealNS.withAlphaComponent(0.8).setFill()
+        diamond.fill()
+    }
+
+    /// 待办方框：未完成是描边小方框，完成后是朱砂底白色对勾
+    private func drawTask(_ range: NSRange, checked: Bool) {
+        // range 是 “- [ ]”，方框画在 “[” 的位置
+        guard range.length >= 3, let point = anchor(at: range.location + 2) else { return }
+        let size: CGFloat = 14
+        let box = NSRect(x: point.x.rounded() + 0.5, y: (point.midY - size / 2).rounded() + 0.5, width: size - 1, height: size - 1)
+        let path = NSBezierPath(roundedRect: box, xRadius: 3.5, yRadius: 3.5)
+        if checked {
+            Palette.sealNS.setFill()
+            path.fill()
+            let check = NSBezierPath()
+            check.move(to: NSPoint(x: box.minX + 3.2, y: box.midY + 0.2))
+            check.line(to: NSPoint(x: box.minX + 5.7, y: box.maxY - 3.4))
+            check.line(to: NSPoint(x: box.maxX - 3, y: box.minY + 3.6))
+            check.lineWidth = 1.6
+            check.lineCapStyle = .round
+            check.lineJoinStyle = .round
+            NSColor.white.setStroke()
+            check.stroke()
+        } else {
+            path.lineWidth = 1.2
+            Palette.mutedNS.withAlphaComponent(0.7).setStroke()
+            path.stroke()
+        }
+    }
+
+    /// 无序列表：朱砂小圆点
+    private func drawBullet(_ range: NSRange) {
+        guard let point = anchor(at: range.location) else { return }
+        let d: CGFloat = 5
+        let x = point.x + bodyFontSize * 0.12
+        Palette.sealNS.setFill()
+        NSBezierPath(ovalIn: NSRect(x: x, y: point.midY - d / 2, width: d, height: d)).fill()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -296,7 +380,7 @@ final class MarkdownTextView: NSTextView {
         super.mouseDown(with: event)
     }
 
-    /// 点在 “[ ]” 上时切换勾选状态（可撤销）
+    /// 点在待办方框上时切换勾选状态（可撤销）
     private func toggleTask(at point: NSPoint) -> Bool {
         let ns = string as NSString
         guard ns.length > 0 else { return false }
@@ -306,9 +390,10 @@ final class MarkdownTextView: NSTextView {
         guard let match = MarkdownStyler.taskBox.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) else {
             return false
         }
-        let box = NSRange(location: lineRange.location + match.range(at: 1).location, length: 3) // “[ ]”
-        guard index >= box.location, index <= NSMaxRange(box) else { return false }
-        let markRange = NSRange(location: box.location + 1, length: 1)
+        // “- [ ] ” 整段都算可点击区域
+        let prefix = NSRange(location: lineRange.location + match.range(at: 1).location, length: match.range(at: 1).length + 1)
+        guard index >= prefix.location, index <= NSMaxRange(prefix) else { return false }
+        let markRange = NSRange(location: prefix.location + 3, length: 1)
         let checked = ns.substring(with: markRange).lowercased() == "x"
         let replacement = checked ? " " : "x"
         if shouldChangeText(in: markRange, replacementString: replacement) {
@@ -329,8 +414,8 @@ final class MarkdownStyler {
         self.fontSize = fontSize
         baseFont = Fonts.song(fontSize)
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = 1.55
-        paragraph.paragraphSpacing = 6
+        paragraph.lineHeightMultiple = 1.3
+        paragraph.paragraphSpacing = 5
         baseAttributes = [
             .font: baseFont,
             .foregroundColor: Palette.ink2NS,
@@ -344,11 +429,11 @@ final class MarkdownStyler {
 
     /// 列表前缀：缩进 + 标记（待办 / 无序 / 有序 / 引用）
     static let listPrefix = regex(#"^(\s*)([-*+] \[[ xX]\] |[-*+] |\d+\. |> )"#)
-    static let taskBox = regex(#"^\s*[-*+] (\[[ xX]\]) "#)
+    static let taskBox = regex(#"^\s*([-*+] \[[ xX]\]) "#)
 
     private static let heading = regex(#"^(#{1,6})[ \t]+(.+)$"#)
     private static let rule = regex(#"^ {0,3}([-*_])(?: *\1){2,} *$"#)
-    private static let task = regex(#"^(\s*[-*+] \[([ xX])\] )(.*)$"#)
+    private static let task = regex(#"^\s*(([-*+] )\[([ xX])(\])) (.*)$"#)
     private static let bullet = regex(#"^(\s*)([-*+]|\d+\.)( )(?!\[[ xX]\] )"#)
     private static let quote = regex(#"^(>+ ?)(.*)$"#)
     private static let bold = regex(#"(\*\*|__)(?=\S)(.+?)(?<=\S)\1"#)
@@ -356,12 +441,10 @@ final class MarkdownStyler {
     private static let code = regex(#"`([^`\n]+)`"#)
     private static let link = regex(#"\[([^\]\n]+)\]\(([^)\s]+)\)"#)
 
-    /// 渲染样式，返回需要画成横线的分隔线范围
-    @discardableResult
-    func apply(to storage: NSTextStorage) -> [NSRange] {
+    /// 渲染样式；分隔线、待办、圆点用自定义属性标出，由 MarkdownTextView 绘制
+    func apply(to storage: NSTextStorage) {
         let text = storage.string as NSString
         let full = NSRange(location: 0, length: text.length)
-        var rules: [NSRange] = []
         storage.beginEditing()
         storage.setAttributes(baseAttributes, range: full)
 
@@ -371,6 +454,7 @@ final class MarkdownStyler {
             }
         }
         let faint: [NSAttributedString.Key: Any] = [.foregroundColor: Palette.faintNS]
+        let hidden: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.clear]
 
         each(Self.heading) { m in
             let level = m.range(at: 1).length
@@ -380,21 +464,32 @@ final class MarkdownStyler {
         }
         each(Self.rule) { m in
             // 符号隐藏，由 MarkdownTextView 画一条横线
-            storage.addAttributes([.foregroundColor: NSColor.clear], range: m.range)
-            rules.append(m.range)
+            storage.addAttributes(hidden, range: m.range)
+            storage.addAttribute(.qnRule, value: true, range: m.range)
         }
         each(Self.task) { m in
-            storage.addAttributes(faint, range: m.range(at: 1))
-            if text.substring(with: m.range(at: 2)).lowercased() == "x" {
+            // “- [ ]” 隐藏后画成方框；“- ” 缩到很窄，方框和文字之间留一点空
+            let checked = text.substring(with: m.range(at: 3)).lowercased() == "x"
+            storage.addAttributes(hidden, range: m.range(at: 1))
+            storage.addAttribute(.qnTask, value: checked, range: m.range(at: 1))
+            storage.addAttribute(.font, value: Fonts.song(3) as NSFont, range: m.range(at: 2))
+            storage.addAttribute(.kern, value: 5, range: m.range(at: 4))
+            if checked {
                 storage.addAttributes([
                     .foregroundColor: Palette.mutedNS,
                     .strikethroughStyle: NSUnderlineStyle.single.rawValue,
                     .strikethroughColor: Palette.faintNS,
-                ], range: m.range(at: 3))
+                ], range: m.range(at: 5))
             }
         }
         each(Self.bullet) { m in
-            storage.addAttributes([.foregroundColor: Palette.sealNS], range: m.range(at: 2))
+            let marker = m.range(at: 2)
+            if marker.length == 1 {
+                storage.addAttributes(hidden, range: marker)
+                storage.addAttribute(.qnBullet, value: true, range: marker)
+            } else {
+                storage.addAttributes([.foregroundColor: Palette.sealNS], range: marker)
+            }
         }
         each(Self.quote) { m in
             storage.addAttributes([.foregroundColor: Palette.sealNS], range: m.range(at: 1))
@@ -427,6 +522,5 @@ final class MarkdownStyler {
             storage.addAttributes(faint, range: NSRange(location: NSMaxRange(m.range(at: 1)), length: NSMaxRange(m.range) - NSMaxRange(m.range(at: 1))))
         }
         storage.endEditing()
-        return rules
     }
 }
