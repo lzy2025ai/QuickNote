@@ -342,7 +342,9 @@ struct NoteEditorView: View {
 
                 TagsEditor(tags: note.tags, suggestions: store.allTags.map(\.name))
 
-                FieldsEditor(fields: note.fields)
+                if !draft.fields.isEmpty {
+                    FieldsEditor(fields: note.fields)
+                }
 
                 if !draft.attachments.isEmpty {
                     AttachmentsView(attachments: draft.attachments) { name in
@@ -355,7 +357,7 @@ struct NoteEditorView: View {
             .padding(.horizontal, Metrics.editorInset)
             .padding(.bottom, 8)
 
-            NoteTextView(text: note.content, placeholder: "写点什么…  支持 Markdown：# 标题、**加粗**、- 列表、- [ ] 待办、--- 分隔")
+            NoteTextView(text: note.content, placeholder: "写点什么…  输入 / 插入待办、标题、列表、分隔线")
 
             footer
         }
@@ -442,6 +444,20 @@ struct NoteEditorView: View {
                         commitNow()
                     }
                 }
+                Button("添加字段") {
+                    withAnimation(Motion.standard) { note.wrappedValue.fields.append(NoteField()) }
+                }
+                Menu("字段模板") {
+                    ForEach(FieldTemplate.allCases, id: \.self) { t in
+                        Button(t.rawValue + "（" + t.keys.joined(separator: "、") + "）") {
+                            let existing = Set(draft.fields.map(\.key))
+                            withAnimation(Motion.standard) {
+                                note.wrappedValue.fields += t.keys.filter { !existing.contains($0) }.map { NoteField(key: $0) }
+                            }
+                        }
+                    }
+                }
+                Divider()
                 Picker("移动到", selection: note.projectID) {
                     Text("收件箱").tag(UUID?.none)
                     ForEach(store.projects) { p in
@@ -647,43 +663,7 @@ struct FieldsEditor: View {
                     withAnimation(Motion.standard) { fields.removeAll { $0.id == id } }
                 }
             }
-            FieldActions(fields: $fields)
-                .padding(.top, fields.isEmpty ? 0 : 4)
         }
-    }
-}
-
-/// “添加字段 / 字段模板”两个轻量入口
-struct FieldActions: View {
-    @Binding var fields: [NoteField]
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Button {
-                withAnimation(Motion.standard) { fields.append(NoteField()) }
-            } label: {
-                Text("＋ 字段")
-            }
-            Menu {
-                ForEach(FieldTemplate.allCases, id: \.self) { t in
-                    Button(t.rawValue) {
-                        let existing = Set(fields.map(\.key))
-                        withAnimation(Motion.standard) {
-                            fields += t.keys.filter { !existing.contains($0) }.map { NoteField(key: $0) }
-                        }
-                    }
-                }
-            } label: {
-                Text("字段模板")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-        }
-        .buttonStyle(.borderless)
-        .font(.system(size: 12))
-        .foregroundStyle(Palette.muted)
-        .tint(Palette.muted)
     }
 }
 
