@@ -155,6 +155,7 @@ struct NoteRow: View {
         let terms = SearchText.terms(query)
         let preview = terms.isEmpty ? note.preview : SearchText.snippet(note.preview, terms: terms)
         let project = showProject ? store.project(note.projectID) : nil
+        let hasImages = !note.attachments.isEmpty || !note.inlineImages.isEmpty
 
         HStack(alignment: .top, spacing: 14) {
             VStack(spacing: 2) {
@@ -180,7 +181,7 @@ struct NoteRow: View {
                         .lineSpacing(2)
                         .lineLimit(2)
                 }
-                if project != nil || !note.tags.isEmpty || !note.attachments.isEmpty {
+                if project != nil || !note.allTags.isEmpty || hasImages {
                     HStack(spacing: 8) {
                         if let project {
                             HStack(spacing: 4) {
@@ -188,11 +189,11 @@ struct NoteRow: View {
                                 Text(project.name).foregroundStyle(Palette.muted)
                             }
                         }
-                        if !note.attachments.isEmpty {
+                        if hasImages {
                             Image(systemName: "photo").foregroundStyle(Palette.muted)
                         }
-                        if !note.tags.isEmpty {
-                            Text(note.tags.map { "#" + $0 }.joined(separator: " · "))
+                        if !note.allTags.isEmpty {
+                            Text(note.allTags.map { "#" + $0 }.joined(separator: " · "))
                                 .foregroundStyle(Palette.tag)
                         }
                     }
@@ -246,6 +247,7 @@ struct NoteEditorView: View {
     @EnvironmentObject var settings: AppSettings
     let noteID: UUID
     let autoFocusTitle: Bool
+    let reveal: RevealTarget?
     let onAutoFocused: () -> Void
 
     @State private var draft: Note
@@ -255,9 +257,10 @@ struct NoteEditorView: View {
     @FocusState private var titleFocused: Bool
 
     /// 直接用笔记初始化草稿，切换笔记时第一帧就有内容，不会闪白
-    init(note: Note, autoFocusTitle: Bool = false, onAutoFocused: @escaping () -> Void = {}) {
+    init(note: Note, autoFocusTitle: Bool = false, reveal: RevealTarget? = nil, onAutoFocused: @escaping () -> Void = {}) {
         noteID = note.id
         self.autoFocusTitle = autoFocusTitle
+        self.reveal = reveal
         self.onAutoFocused = onAutoFocused
         _draft = State(initialValue: note)
     }
@@ -357,7 +360,19 @@ struct NoteEditorView: View {
             .padding(.horizontal, Metrics.editorInset)
             .padding(.bottom, 8)
 
-            NoteTextView(text: note.content, placeholder: "写点什么…  输入 / 插入待办、标题、列表、分隔线")
+            NoteTextView(
+                text: note.content,
+                placeholder: "写点什么…  输入 / 插入待办、标题、列表，#标签，⌘V 粘贴图片",
+                reveal: reveal,
+                attachmentURL: { store.attachmentURL($0) },
+                importImages: importPastedImages
+            )
+            .overlay(alignment: .top) {
+                // 正文滚动时，顶部文字淡出，不会硬生生切在标签栏下面
+                LinearGradient(colors: [Palette.paper, Palette.paper.opacity(0)], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 14)
+                    .allowsHitTesting(false)
+            }
 
             footer
         }
@@ -390,6 +405,16 @@ struct NoteEditorView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("删除后无法恢复。")
+        }
+    }
+
+    /// ⌘V 粘贴的图片：存进附件目录，返回文件名，由正文插入 ![](文件名)
+    private func importPastedImages(_ items: [PastedImage]) -> [String] {
+        items.compactMap { item in
+            switch item {
+            case .file(let url): return store.importAttachment(fileURL: url)
+            case .png(let data): return store.importAttachment(pngData: data)
+            }
         }
     }
 

@@ -381,7 +381,7 @@ final class Store: ObservableObject {
         case .inbox: return notes.lazy.filter { $0.projectID == nil }.count
         case .clipboard: return clips.count
         case .project(let id): return notes.lazy.filter { $0.projectID == id }.count
-        case .tag(let tag): return notes.lazy.filter { $0.tags.contains(tag) }.count
+        case .tag(let tag): return notes.lazy.filter { $0.hasTag(tag) }.count
         }
     }
 
@@ -393,7 +393,7 @@ final class Store: ObservableObject {
         case .all: list = notes
         case .inbox: list = notes.filter { $0.projectID == nil }
         case .project(let id): list = notes.filter { $0.projectID == id }
-        case .tag(let tag): list = notes.filter { $0.tags.contains(tag) }
+        case .tag(let tag): list = notes.filter { $0.hasTag(tag) }
         case .clipboard: list = []
         }
         return list.sorted(by: Note.ordering)
@@ -410,7 +410,9 @@ final class Store: ObservableObject {
         guard let note = notes.first(where: { $0.id == id }) else { return }
         deleted[id.uuidString] = Date()
         notes.removeAll { $0.id == id }
-        for name in note.attachments {
+        // 正文里的图片只在没有别的笔记引用时才删除
+        let stillUsed = Set(notes.flatMap { $0.attachments + $0.inlineImages })
+        for name in note.attachments + note.inlineImages where !stillUsed.contains(name) {
             try? FileManager.default.removeItem(at: attachmentURL(name))
         }
     }
@@ -472,7 +474,7 @@ final class Store: ObservableObject {
     var allTags: [(name: String, count: Int)] {
         var counts: [String: Int] = [:]
         for n in notes {
-            for t in n.tags { counts[t, default: 0] += 1 }
+            for t in n.allTags { counts[t, default: 0] += 1 }
         }
         return counts
             .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
@@ -489,18 +491,20 @@ final class Store: ObservableObject {
         let new = Store.normalizeTag(newName)
         guard !new.isEmpty, new != old else { return }
         let now = Date()
-        for i in notes.indices where notes[i].tags.contains(old) {
+        for i in notes.indices where notes[i].hasTag(old) {
             var result: [String] = []
             for t in notes[i].tags.map({ $0 == old ? new : $0 }) where !result.contains(t) { result.append(t) }
             notes[i].tags = result
+            notes[i].content = Note.replacingInlineTag(old, with: new, in: notes[i].content)
             notes[i].updatedAt = now
         }
     }
 
     func deleteTag(_ tag: String) {
         let now = Date()
-        for i in notes.indices where notes[i].tags.contains(tag) {
+        for i in notes.indices where notes[i].hasTag(tag) {
             notes[i].tags.removeAll { $0 == tag }
+            notes[i].content = Note.replacingInlineTag(tag, with: nil, in: notes[i].content)
             notes[i].updatedAt = now
         }
     }
@@ -626,7 +630,7 @@ final class Store: ObservableObject {
             return terms.allSatisfy { term in
                 if term.count > 1, term.hasPrefix("#") || term.hasPrefix("＃") {
                     let t = String(term.dropFirst())
-                    return n.tags.contains { $0.localizedCaseInsensitiveContains(t) }
+                    return n.allTags.contains { $0.localizedCaseInsensitiveContains(t) }
                 }
                 return hay.localizedCaseInsensitiveContains(term)
             }

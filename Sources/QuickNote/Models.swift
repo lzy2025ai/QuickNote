@@ -78,6 +78,7 @@ struct Note: Identifiable, Codable, Hashable {
                 (#"^>+\s?"#, ""),
                 (#"^[-*+]\s+\[[ xX]\]\s+"#, ""),
                 (#"^([-*+]|\d+\.)\s+"#, ""),
+                (#"!\[[^\]]*\]\([^)]+\)"#, "[图片]"),
                 (#"\[([^\]]+)\]\([^)]+\)"#, "$1"),
                 (#"(\*\*|__|`)"#, ""),
             ] {
@@ -224,5 +225,53 @@ extension KeyedDecodingContainer {
     func value<T: Decodable>(_ key: Key, default fallback: @autoclosure () -> T) -> T {
         if let v = try? decodeIfPresent(T.self, forKey: key) { return v }
         return fallback()
+    }
+}
+
+// MARK: - 正文里的标签与图片
+
+extension Note {
+    /// 正文里的 #标签：# 后紧跟文字，遇到空白或标点结束；“# 标题” “##” 不算
+    static let inlineTagRegex = try! NSRegularExpression(pattern: #"(?<![\p{L}\p{N}_#&/=])#([\p{L}\p{N}_\-]+)"#)
+    /// 单独一行的图片：![](文件名)
+    static let inlineImageRegex = try! NSRegularExpression(pattern: #"^!\[[^\]\n]*\]\(([^)\s]+)\)[ \t]*$"#, options: [.anchorsMatchLines])
+
+    var inlineTags: [String] {
+        var result: [String] = []
+        let ns = content as NSString
+        for m in Note.inlineTagRegex.matches(in: content, range: NSRange(location: 0, length: ns.length)) {
+            let t = ns.substring(with: m.range(at: 1))
+            if !result.contains(t) { result.append(t) }
+        }
+        return result
+    }
+
+    /// 标签栏里的标签 + 正文里的 #标签
+    var allTags: [String] {
+        var result = tags
+        for t in inlineTags where !result.contains(t) { result.append(t) }
+        return result
+    }
+
+    func hasTag(_ tag: String) -> Bool { tags.contains(tag) || inlineTags.contains(tag) }
+
+    /// 正文里插入的图片文件名（位于附件目录）
+    var inlineImages: [String] {
+        let ns = content as NSString
+        return Note.inlineImageRegex.matches(in: content, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range(at: 1)) }
+            .filter { !$0.contains("/") }
+    }
+
+    /// 把正文里的 #old 换成 #new（new 为空表示去掉 # 号，只留文字）
+    static func replacingInlineTag(_ old: String, with new: String?, in text: String) -> String {
+        let ns = text as NSString
+        var result = text
+        for m in Note.inlineTagRegex.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed()
+        where ns.substring(with: m.range(at: 1)) == old {
+            let replacement = new.map { "#" + $0 } ?? old
+            result = (result as NSString).replacingCharacters(in: m.range, with: replacement)
+        }
+        return result
     }
 }

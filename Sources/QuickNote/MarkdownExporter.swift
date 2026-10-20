@@ -6,8 +6,8 @@ enum MarkdownExporter {
     static func markdown(for note: Note, projectName: String?, assetsFolder: String = "assets") -> String {
         var lines = ["---", "title: \(yamlQuote(note.displayTitle))"]
         if let projectName { lines.append("project: \(yamlQuote(projectName))") }
-        if !note.tags.isEmpty {
-            lines.append("tags: [" + note.tags.map(yamlQuote).joined(separator: ", ") + "]")
+        if !note.allTags.isEmpty {
+            lines.append("tags: [" + note.allTags.map(yamlQuote).joined(separator: ", ") + "]")
         }
         lines.append("created: \(iso(note.createdAt))")
         lines.append("updated: \(iso(note.updatedAt))")
@@ -21,7 +21,12 @@ enum MarkdownExporter {
             lines.append("")
         }
         if !note.content.isEmpty {
-            lines += [note.content, ""]
+            // 正文里的图片指向导出目录的 assets/
+            let content = Note.inlineImageRegex.stringByReplacingMatches(
+                in: note.content, range: NSRange(location: 0, length: (note.content as NSString).length),
+                withTemplate: "![]($1)"
+            ).replacingOccurrences(of: #"!\[\]\(([^)/\s]+)\)"#, with: "![](\(assetsFolder)/$1)", options: .regularExpression)
+            lines += [content, ""]
         }
         for a in note.attachments {
             lines.append("![](\(assetsFolder)/\(a))")
@@ -89,10 +94,11 @@ enum MarkdownExporter {
     private static func write(_ note: Note, to url: URL, store: Store) throws {
         let md = markdown(for: note, projectName: store.project(note.projectID)?.name)
         try md.write(to: url, atomically: true, encoding: .utf8)
-        guard !note.attachments.isEmpty else { return }
+        let images = note.attachments + note.inlineImages
+        guard !images.isEmpty else { return }
         let assets = url.deletingLastPathComponent().appendingPathComponent("assets", isDirectory: true)
         try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: true)
-        for name in note.attachments {
+        for name in images {
             let dest = assets.appendingPathComponent(name)
             if !FileManager.default.fileExists(atPath: dest.path) {
                 try? FileManager.default.copyItem(at: store.attachmentURL(name), to: dest)

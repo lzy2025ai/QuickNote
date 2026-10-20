@@ -177,7 +177,8 @@ struct ContentView: View {
     @ViewBuilder
     private var detailColumn: some View {
         if case .note(let id)? = detail, let note = store.notes.first(where: { $0.id == id }) {
-            NoteEditorView(note: note, autoFocusTitle: id == justCreatedID, onAutoFocused: { justCreatedID = nil })
+            NoteEditorView(note: note, autoFocusTitle: id == justCreatedID, reveal: revealTerm(in: note),
+                           onAutoFocused: { justCreatedID = nil })
                 .id(id)
                 .transition(.opacity)
         } else if case .clip(let id)? = detail, store.clips.contains(where: { $0.id == id }) {
@@ -187,6 +188,19 @@ struct ContentView: View {
         } else {
             EmptyStateView(title: "选一则笔记，或新建一则", detail: "⌘N 新建　⌘F 搜索\n⌥Space 随手记一笔")
         }
+    }
+
+    /// 打开笔记时要定位到的文字：按标签筛选时是正文里的 #标签，搜索时是第一个关键词
+    private func revealTerm(in note: Note) -> RevealTarget? {
+        if isSearching {
+            guard let term = SearchText.terms(query).first else { return nil }
+            if term.count > 1, term.hasPrefix("#") || term.hasPrefix("＃") {
+                return note.inlineTags.first { $0.localizedCaseInsensitiveContains(term.dropFirst()) }.map { RevealTarget.tag($0) }
+            }
+            return .text(term)
+        }
+        if case .tag(let t)? = selection, note.inlineTags.contains(t) { return .tag(t) }
+        return nil
     }
 
     private func createNote() {
