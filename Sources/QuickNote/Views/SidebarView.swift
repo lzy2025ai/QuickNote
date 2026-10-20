@@ -20,6 +20,7 @@ struct SidebarView: View {
                     .tracking(6)
                     .foregroundStyle(Palette.ink)
             }
+            .help(AppVersion.detail)
             .padding(.horizontal, 20)
             .padding(.top, Metrics.titlebarHeight + 6)
             .padding(.bottom, 22)
@@ -69,12 +70,21 @@ struct SidebarView: View {
 
             // 与“备忘录”的“新建文件夹”一样放在侧栏底部
             VStack(alignment: .leading, spacing: 6) {
-                if !store.syncStatus.isEmpty {
-                    Label(store.syncStatus, systemImage: store.isICloud ? "icloud" : "externaldrive")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
+                HStack(spacing: 8) {
+                    if !store.syncStatus.isEmpty {
+                        Label(store.syncStatus, systemImage: store.isICloud ? "icloud" : "externaldrive")
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    // 版本号：对照 GitHub Actions 运行编号，确认装的是哪一版
+                    Text(verbatim: AppVersion.display)
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.faint)
+                        .help(AppVersion.detail)
+                        .textSelection(.enabled)
                 }
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
                 Button {
                     showNewProject = true
                 } label: {

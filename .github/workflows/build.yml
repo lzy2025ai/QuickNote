@@ -43,7 +43,7 @@ jobs:
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
-          name: QuickNote-app
+          name: QuickNote-v1.0.${{ github.run_number }}
           path: build/QuickNote.zip
 
       - name: Upload build log

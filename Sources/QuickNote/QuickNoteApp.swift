@@ -24,6 +24,23 @@ extension Notification.Name {
     static let qnDockIconChanged = Notification.Name("qn.dockIconChanged")
 }
 
+/// 版本号（来自 Info.plist，由 build.sh 写入）
+enum AppVersion {
+    static var short: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+
+    static var commit: String {
+        Bundle.main.object(forInfoDictionaryKey: "QNCommit") as? String ?? "dev"
+    }
+
+    /// 侧栏底部显示：v1.0.42
+    static var display: String { "v" + short }
+
+    /// 悬停提示：版本 1.0.42 · 提交 abc1234
+    static var detail: String { "版本 \(short) · 提交 \(commit)" }
+}
+
 enum Pasteboard {
     static func copy(_ text: String) {
         let pb = NSPasteboard.general

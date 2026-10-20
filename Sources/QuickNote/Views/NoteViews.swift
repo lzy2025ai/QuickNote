@@ -373,6 +373,11 @@ struct NoteEditorView: View {
                     .frame(height: 14)
                     .allowsHitTesting(false)
             }
+            .overlay(alignment: .bottom) {
+                LinearGradient(colors: [Palette.paper.opacity(0), Palette.paper], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 14)
+                    .allowsHitTesting(false)
+            }
 
             footer
         }

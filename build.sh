@@ -6,7 +6,10 @@ cd "$(dirname "$0")"
 APP_NAME="QuickNote"
 DISPLAY_NAME="随手记"
 BUNDLE_ID="com.local.quicknote"
-VERSION="1.0.0"
+# 版本号 1.0.<构建号>：在 GitHub Actions 上构建号就是运行编号（运行页面标题里的 #N）
+BUILD_NUMBER="${GITHUB_RUN_NUMBER:-0}"
+VERSION="1.0.$BUILD_NUMBER"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo dev)"
 
 # 通用二进制：同时支持 Apple 芯片（arm64）和 Intel 芯片（x86_64）
 ARCH_FLAGS=(--arch arm64 --arch x86_64)
@@ -35,7 +38,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleDisplayName</key><string>$DISPLAY_NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
+    <key>QNCommit</key><string>$COMMIT</string>
     <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
