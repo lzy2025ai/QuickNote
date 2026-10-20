@@ -35,36 +35,37 @@ final class ClipboardMonitor: NSObject {
         guard settings.clipboardEnabled else { return }
 
         let types = Set(pb.types ?? [])
-        guard types.isDisjoint(with: ignoredTypes) else { return }
-
         // 在本应用里复制的内容（例如复制客户电话）不进历史
-        let front = NSWorkspace.shared.frontmostApplication
-        if front?.processIdentifier == NSRunningApplication.current.processIdentifier { return }
-        let source = front?.localizedName
+        if types.contains(Pasteboard.ownMarker) { return }
+        // 密码一律不记；“临时”“自动生成”的标记只用来跳过文字，截图工具有时也会给图片打这类标记
+        if types.contains(.init("org.nspasteboard.ConcealedType")) { return }
+        let skipText = !types.isDisjoint(with: ignoredTypes)
 
-        // 1. 在访达里复制的文件：单张图片记录为图片，其他记录文件路径
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-           !urls.isEmpty {
-            if settings.recordImages, urls.count == 1,
-               let type = UTType(filenameExtension: urls[0].pathExtension), type.conforms(to: .image),
+        let front = NSWorkspace.shared.frontmostApplication
+        // 在本 App 前台时用别的工具截图，来源记成空，不显示“随手记”
+        let source = front?.processIdentifier == NSRunningApplication.current.processIdentifier ? nil : front?.localizedName
+
+        // 1. 文件：单张图片记录为图片，其他记录文件路径
+        let urls = Pasteboard.fileURLs(pb)
+        if !urls.isEmpty {
+            if settings.recordImages, urls.count == 1, Pasteboard.isImageFile(urls[0]),
                let data = try? Data(contentsOf: urls[0]) {
                 recordImage(data, source: source)
-            } else {
+            } else if !skipText {
                 store.addTextClip(urls.map(\.path).joined(separator: "\n"), source: source, limit: settings.clipLimit)
             }
             return
         }
 
         // 2. 文本（同时带图片的，例如从表格复制，以文本为准）
-        if let text = pb.string(forType: .string),
-           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            guard text.count <= 200_000 else { return }
+        if let text = Pasteboard.meaningfulText(pb) {
+            guard !skipText, text.count <= 200_000 else { return }
             store.addTextClip(text, source: source, limit: settings.clipLimit)
             return
         }
 
-        // 3. 纯图片：截图、网页里“拷贝图像”等
-        if settings.recordImages, let data = pb.data(forType: .png) ?? pb.data(forType: .tiff) {
+        // 3. 纯图片：截图、网页里“拷贝图像”等（PNG、TIFF、JPEG、HEIC… 都认）
+        if settings.recordImages, let data = Pasteboard.imagePNGData(pb) {
             recordImage(data, source: source)
         }
     }

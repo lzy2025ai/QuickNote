@@ -243,6 +243,25 @@ struct ClipboardSettings: View {
                 }
                 Toggle("双击复制后自动隐藏窗口", isOn: $settings.hideAfterCopy)
             }
+            Section {
+                LabeledContent("某个 App 复制的内容记录不到？") {
+                    Button("检查当前剪贴板…") {
+                        let alert = NSAlert()
+                        alert.messageText = "当前剪贴板里的格式"
+                        alert.informativeText = Pasteboard.describe()
+                        alert.addButton(withTitle: "拷贝诊断信息")
+                        alert.addButton(withTitle: "好")
+                        if alert.runModal() == .alertFirstButtonReturn {
+                            let info = alert.informativeText
+                            Pasteboard.copy(info)
+                        }
+                    }
+                }
+            } footer: {
+                Text("在那个 App 里复制后点这里，把结果发给开发者，方便适配。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

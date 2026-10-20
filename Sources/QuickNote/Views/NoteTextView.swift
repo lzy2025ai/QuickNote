@@ -16,13 +16,13 @@ enum PastedImage {
 
     /// 剪贴板里是图片（截图、图片文件）时返回；有文字时按普通粘贴处理
     static func read(from pb: NSPasteboard) -> [PastedImage]? {
-        let urls = (pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        let urls = Pasteboard.fileURLs(pb)
         if !urls.isEmpty {
-            let images = urls.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }
-            return images.isEmpty ? nil : images.map { .file($0) }
+            let images = urls.filter(Pasteboard.isImageFile)
+            if !images.isEmpty { return images.map { .file($0) } }
         }
-        if pb.string(forType: .string) != nil { return nil }
-        if let png = pb.data(forType: .png) ?? NSImage(pasteboard: pb)?.pngData { return [.png(png)] }
+        if Pasteboard.meaningfulText(pb) != nil { return nil }
+        if let png = Pasteboard.imagePNGData(pb) { return [.png(png)] }
         return nil
     }
 }
@@ -431,6 +431,17 @@ final class MarkdownTextView: NSTextView {
     }
 
     // MARK: 粘贴
+
+    /// 在正文里复制、剪切的文字不进剪贴板历史
+    override func copy(_ sender: Any?) {
+        super.copy(sender)
+        Pasteboard.markOwn()
+    }
+
+    override func cut(_ sender: Any?) {
+        super.cut(sender)
+        Pasteboard.markOwn()
+    }
 
     override func paste(_ sender: Any?) {
         if let images = PastedImage.read(from: .general), onPasteImages?(images) == true { return }
