@@ -96,6 +96,14 @@ enum Pasteboard {
         return CGImageSourceGetType(source) != nil && CGImageSourceGetCount(source) > 0
     }
 
+    /// 剪贴板里有没有图片（只看格式，不解码，菜单校验时调用要快）
+    static func hasImage(_ pb: NSPasteboard = .general) -> Bool {
+        let types = pb.types ?? []
+        if types.contains(where: { UTType($0.rawValue)?.conforms(to: .image) == true }) { return true }
+        if types.contains(.init("NeXT TIFF v4.0 pasteboard type")) { return true }
+        return fileURLs(pb).contains(where: isImageFile)
+    }
+
     /// 读取剪贴板中的图片，统一转成 PNG。
     /// 除了 PNG / TIFF，也认 JPEG、HEIC、GIF 等任何图片格式（微信、QQ 截图放的格式不一定是 PNG）
     static func imagePNGData(_ pb: NSPasteboard = .general) -> Data? {

@@ -448,6 +448,18 @@ final class MarkdownTextView: NSTextView {
         super.paste(sender)
     }
 
+    // 纯文本编辑器默认只在剪贴板里有文字时才启用“粘贴”，剪贴板里只有图片（比如微信截图）时
+    // ⌘V 根本不会走到 paste(_:)。这里告诉系统：有图片也可以粘贴。
+    override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(paste(_:)), isEditable, onPasteImages != nil, Pasteboard.hasImage() { return true }
+        return super.validateMenuItem(item)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)), isEditable, onPasteImages != nil, Pasteboard.hasImage() { return true }
+        return super.validateUserInterfaceItem(item)
+    }
+
     // MARK: 绘制
 
     override func drawBackground(in rect: NSRect) {
